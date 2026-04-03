@@ -1,0 +1,30 @@
+# Ignore all
+*
+*.*
+
+# But include these directories
+!.gitignore
+!Assets/
+!Packages/
+!ProjectSettings/
+!UserSettings/
+
+# Include subdirectories
+!Assets/**
+!Packages/**
+!ProjectSettings/**
+!UserSettings/**
+
+# Ignore specific files we don't need
+Library/
+Logs/
+Temp/
+obj/
+bin/
+
+# IDE
+.vs/
+.vscode/
+*.sln.DotSettings
+*.user
+*.DotSettings
