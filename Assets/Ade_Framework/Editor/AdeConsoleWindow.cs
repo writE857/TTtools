@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEditorInternal;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class AdeConsoleWindow : EditorWindow
 {
@@ -16,6 +19,10 @@ public class AdeConsoleWindow : EditorWindow
     const string FeedLaunchModePlayerPrefsKey = "Ade.Editor.FeedLaunchMode";
     const string BgdtPackagePath = @"E:\UnityTools\Editor\TTtool\com.bytedance.bgdt-cp-3.0.271.unitypackage";
     const string MinigamePackagePath = @"E:\UnityTools\Editor\TTtool\minigame.202601131148.unitypackage";
+    const string NoAdsSymbol = "ADE_NO_ADS";
+    const string ProjectSettingsAssetPath = "ProjectSettings/ProjectSettings.asset";
+    const string BuiltinWebGLTemplateRoot = @"E:\UnityEditor\2021.3.21f1c1\Editor\Data\PlaybackEngines\WebGLSupport\BuildTools\WebGLTemplates";
+    const string LivePathPrefabPath = "Assets/Ade_Framework/Resources/直播路径.prefab";
 
     static readonly string[] KnownPlatformSymbols =
     {
@@ -41,16 +48,33 @@ public class AdeConsoleWindow : EditorWindow
     string cachedDefineString = string.Empty;
     bool customSymbolsDirty;
     bool launchModeDirty;
+    bool rewardConfigDirty;
     int selectedPlatformPresetIndex;
     FeedLaunchMode selectedFeedLaunchMode;
     FeedLaunchMode cachedFeedLaunchMode;
+    string rewardShareIdDraft = string.Empty;
+    string rewardFeedRepeatContentIdDraft = string.Empty;
+    [SerializeField] GameObject livePathPrefabOverride;
+    readonly AdItemDraft interstitialAdDraft = new();
+    readonly AdItemDraft bannerAdDraft = new();
+    readonly List<string> subscribeTemplateDrafts = new();
+    readonly List<string> feedContentDrafts = new();
+    readonly List<AdItemDraft> rewardAdDrafts = new();
     readonly List<string> editableCustomSymbols = new();
     ReorderableList customSymbolList;
+    ReorderableList subscribeTemplateList;
+    ReorderableList feedContentList;
+    ReorderableList rewardAdList;
     GUIStyle sectionTitleStyle;
     GUIStyle sectionNoteStyle;
     GUIStyle summaryLabelStyle;
     GUIStyle summaryValueStyle;
     GUIStyle pathLabelStyle;
+    GUIStyle templateCardStyle;
+    GUIStyle templateCardSelectedStyle;
+    GUIStyle templateButtonStyle;
+    GUIStyle templateNameSelectedStyle;
+    GUIStyle templateNameStyle;
 
     [MenuItem("Ade_Tools/Ade 控制台")]
     public static void OpenWindow()
@@ -62,7 +86,16 @@ public class AdeConsoleWindow : EditorWindow
     {
         minSize = new Vector2(720f, 520f);
         LoadFeedLaunchMode();
-        BuildStyles();
+        EnsureEditorStateInitialized();
+    }
+
+    void EnsureEditorStateInitialized()
+    {
+        if (customSymbolList != null && subscribeTemplateList != null && feedContentList != null && rewardAdList != null)
+        {
+            return;
+        }
+
         customSymbolList = new ReorderableList(editableCustomSymbols, typeof(string), true, true, true, true);
         customSymbolList.drawHeaderCallback = rect =>
         {
@@ -113,53 +146,82 @@ public class AdeConsoleWindow : EditorWindow
         };
         customSymbolList.footerHeight = 22f;
         customSymbolList.elementHeight = EditorGUIUtility.singleLineHeight + 6f;
+
+        subscribeTemplateList = CreateStringListEditor(subscribeTemplateDrafts, "订阅模板");
+        feedContentList = CreateStringListEditor(feedContentDrafts, "推荐流内容");
+        rewardAdList = CreateAdItemListEditor(rewardAdDrafts, "激励参数");
+        LoadRewardConfigDrafts();
     }
 
     void OnGUI()
     {
+        EnsureEditorStateInitialized();
         BuildStyles();
         BuildTargetGroup group = EditorUserBuildSettings.selectedBuildTargetGroup;
         List<string> symbols = GetSymbols(group);
+        bool beganScrollView = false;
 
         try
         {
             scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+            beganScrollView = true;
 
             DrawHeader(group, symbols);
             EditorGUILayout.Space(12);
 
-            DrawDefineSection(group, symbols);
-            EditorGUILayout.Space(12);
-
-            DrawResourceSection();
-            EditorGUILayout.Space(12);
-
-            DrawPackageCleanupSection();
-            EditorGUILayout.Space(12);
-
-            DrawShortcutSection();
-            EditorGUILayout.Space(12);
-
-            DrawPlayModeSection();
+            DrawQuadrantLayout(group, symbols);
+        }
+        catch (ExitGUIException)
+        {
+            throw;
         }
         catch (Exception exception)
         {
-            EditorGUILayout.HelpBox($"Ade 控制台渲染异常:\n{exception.GetType().Name}: {exception.Message}", MessageType.Error);
+            Debug.LogException(exception);
         }
         finally
         {
-            EditorGUILayout.EndScrollView();
+            if (beganScrollView)
+            {
+                EditorGUILayout.EndScrollView();
+            }
         }
     }
 
     void DrawHeader(BuildTargetGroup group, List<string> symbols)
     {
-        BeginSectionCard("概览", "平台、宏与启动状态");
-        EditorGUILayout.HelpBox("宏定义、普通宏、推荐流启动模式都集中在下方维护。", MessageType.Info);
+        BeginSectionCard("Ade 控制台", string.Empty);
         DrawSummaryRow("当前平台组", group.ToString());
         DrawSummaryRow("当前平台宏", GetCurrentPlatformSymbol(symbols));
         DrawSummaryRow("当前宏列表", symbols.Count > 0 ? string.Join("; ", symbols) : "无");
         EndSectionCard();
+    }
+
+    void DrawQuadrantLayout(BuildTargetGroup group, List<string> symbols)
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            DrawQuadrantColumn(() => DrawDefineSection(group, symbols));
+            GUILayout.Space(10f);
+            DrawQuadrantColumn(DrawPackageCleanupSection);
+        }
+
+        GUILayout.Space(10f);
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            DrawQuadrantColumn(() => DrawRewardConfigSection(group, symbols));
+            GUILayout.Space(10f);
+            DrawQuadrantColumn(DrawWebGLTemplateSection);
+        }
+    }
+
+    void DrawQuadrantColumn(Action drawContent)
+    {
+        using (new EditorGUILayout.VerticalScope(GUILayout.Width(position.width * 0.5f - 18f)))
+        {
+            drawContent?.Invoke();
+        }
     }
 
     void DrawDefineSection(BuildTargetGroup group, List<string> symbols)
@@ -167,7 +229,8 @@ public class AdeConsoleWindow : EditorWindow
         SyncCustomSymbols(group, symbols);
         SyncFeedLaunchMode();
 
-        BeginSectionCard("宏与启动", "平台预设、推荐流模拟、宏列表");
+        BeginSectionCard("宏定义", "平台预设、推荐流模拟、宏列表");
+        EditorGUILayout.LabelField("先选预设，再补充自定义宏。", sectionNoteStyle);
 
         string[] presetLabels = GetPlatformPresetLabels();
         selectedPlatformPresetIndex = GetCurrentPresetIndex(symbols);
@@ -188,8 +251,6 @@ public class AdeConsoleWindow : EditorWindow
             ? presets[selectedPlatformPresetIndex].Description
             : "当前宏不是内置平台预设，可直接在下方列表继续编辑。";
         EditorGUILayout.LabelField(presetDescription, sectionNoteStyle);
-
-        EditorGUILayout.Space(6f);
 
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -213,10 +274,9 @@ public class AdeConsoleWindow : EditorWindow
         }
         EditorGUILayout.LabelField($"当前模拟模式: {GetFeedLaunchModeLabel(selectedFeedLaunchMode)}", sectionNoteStyle);
 
-        EditorGUILayout.Space(8f);
+        EditorGUILayout.Space(4f);
         customSymbolList.DoLayoutList();
 
-        EditorGUILayout.Space(4f);
         using (new EditorGUILayout.HorizontalScope())
         {
             if (GUILayout.Button("复制宏", GUILayout.Height(24)))
@@ -240,140 +300,7 @@ public class AdeConsoleWindow : EditorWindow
             GUI.enabled = true;
         }
 
-        EditorGUILayout.Space(6f);
         DrawSummaryRow("预览结果", BuildDefineString(GetSanitizedCustomSymbols(false)));
-        EndSectionCard();
-    }
-
-    void DrawResourceSection()
-    {
-        BeginSectionCard("配置资源", "资源路径与基础配置");
-
-        UnityEngine.Object adeDataInfo = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdeDataInfoPath);
-        DrawAssetBlock(
-            "AdeDataInfo",
-            AdeDataInfoPath,
-            adeDataInfo,
-            FindOtherAssetPath("AdeDataInfo", AdeDataInfoPath),
-            CreateAdeDataInfoAsset);
-
-        if (adeDataInfo != null)
-        {
-            DrawAdeDataInfoEditor(adeDataInfo);
-        }
-
-        EditorGUILayout.Space(8);
-
-        UnityEngine.Object adsData = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdsDataPath);
-        DrawAssetBlock(
-            "AdsData",
-            AdsDataPath,
-            adsData,
-            FindOtherAssetPath("AdsData", AdsDataPath),
-            CreateAdsDataAsset);
-
-        if (adsData != null)
-        {
-            DrawAdsDataEditor(adsData);
-        }
-
-        EndSectionCard();
-    }
-
-    void DrawShortcutSection()
-    {
-        BeginSectionCard("快捷脚本", "常用入口定位");
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            DrawScriptPingButton("Entry", EntryScriptPath);
-            DrawScriptPingButton("ADManager", ADManagerScriptPath);
-            DrawScriptPingButton("DebugAd", DebugAdScriptPath);
-        }
-
-        EndSectionCard();
-    }
-
-    void DrawPlayModeSection()
-    {
-        BeginSectionCard("运行时操作", "Play Mode 下可用");
-
-        if (!EditorApplication.isPlaying)
-        {
-            EditorGUILayout.HelpBox("进入 Play Mode 后，这里会显示常用测试按钮。", MessageType.None);
-            EndSectionCard();
-            return;
-        }
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            if (GUILayout.Button("激励广告"))
-            {
-                InvokeSingletonMethod(
-                    "ADManager",
-                    "ShowRewardAD",
-                    (Action)(() => Debug.Log("AdeConsole: 奖励广告成功")),
-                    (Action)(() => Debug.LogWarning("AdeConsole: 奖励广告失败")));
-            }
-
-            if (GUILayout.Button("插屏广告"))
-            {
-                InvokeSingletonMethod("ADManager", "ShowWhiteAd");
-            }
-        }
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            if (GUILayout.Button("显示 Banner"))
-            {
-                InvokeSingletonMethod("ADManager", "ShowBanner");
-            }
-
-            if (GUILayout.Button("隐藏 Banner"))
-            {
-                InvokeSingletonMethod("ADManager", "HideBanner");
-            }
-        }
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            if (GUILayout.Button("打开侧边栏面板"))
-            {
-                InvokeSingletonMethod("SidebarPlane", "Show", null);
-            }
-
-            if (GUILayout.Button("打开推荐流面板"))
-            {
-                InvokeSingletonMethod("FeedPlane", "Show", null);
-            }
-        }
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            if (GUILayout.Button("分享"))
-            {
-                TriggerShareFromConsole();
-            }
-
-            if (GUILayout.Button("订阅"))
-            {
-                TriggerSubscribeFromConsole();
-            }
-        }
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            if (GUILayout.Button("排行榜"))
-            {
-                TriggerRankListFromConsole();
-            }
-
-            if (GUILayout.Button("推荐流订阅"))
-            {
-                TriggerFeedFromConsole();
-            }
-        }
-
         EndSectionCard();
     }
 
@@ -427,11 +354,236 @@ public class AdeConsoleWindow : EditorWindow
     void DrawPackageCleanupSection()
     {
         BeginSectionCard("包清理", "按包文件名识别清理目标");
-        EditorGUILayout.HelpBox("按包文件名识别清理目标。ByteGame 相关包会直接清理整个 Assets/Plugins/ByteGame。", MessageType.Warning);
+        EditorGUILayout.LabelField("ByteGame 相关包会直接清理整个 Assets/Plugins/ByteGame。", sectionNoteStyle);
+        EditorGUILayout.Space(4f);
 
+        DrawNoAdsToolbar(EditorUserBuildSettings.selectedBuildTargetGroup, GetSymbols(EditorUserBuildSettings.selectedBuildTargetGroup));
+        EditorGUILayout.Space(6f);
+
+        livePathPrefabOverride = (GameObject)EditorGUILayout.ObjectField(
+            "直播路径预制体",
+            ResolveLivePathPrefab(),
+            typeof(GameObject),
+            false);
+
+        EditorGUILayout.Space(4f);
+        if (GUILayout.Button("给所有场景添加直播路径", GUILayout.Height(24)))
+        {
+            AddLivePathPrefabToAllScenes();
+        }
+        if (GUILayout.Button("删除所有场景里的该预制体", GUILayout.Height(24)))
+        {
+            RemoveLivePathPrefabFromAllScenes();
+        }
+
+        EditorGUILayout.Space(6f);
         DrawPackageCleanupButton(BgdtPackagePath);
         DrawPackageCleanupButton(MinigamePackagePath);
         EndSectionCard();
+    }
+
+    void DrawRewardConfigSection(BuildTargetGroup group, List<string> symbols)
+    {
+        BeginSectionCard("激励参数", "AdeDataInfo 与激励广告配置");
+
+        UnityEngine.Object adeDataInfo = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdeDataInfoPath);
+        DrawAssetBlock(
+            "AdeDataInfo",
+            AdeDataInfoPath,
+            adeDataInfo,
+            FindOtherAssetPath("AdeDataInfo", AdeDataInfoPath),
+            CreateAdeDataInfoAsset);
+
+        if (adeDataInfo != null)
+        {
+            DrawRewardAdeDataInfoEditor();
+        }
+
+        EditorGUILayout.Space(4f);
+
+        UnityEngine.Object adsData = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdsDataPath);
+        DrawAssetBlock(
+            "AdsData",
+            AdsDataPath,
+            adsData,
+            FindOtherAssetPath("AdsData", AdsDataPath),
+            CreateAdsDataAsset);
+
+        if (adsData != null)
+        {
+            DrawRewardOnlyEditor();
+        }
+
+        EditorGUILayout.Space(6f);
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("还原参数", GUILayout.Height(24)))
+            {
+                LoadRewardConfigDrafts();
+            }
+
+            GUI.enabled = rewardConfigDirty && !EditorApplication.isCompiling && !EditorApplication.isUpdating;
+            if (GUILayout.Button("应用参数", GUILayout.Height(24)))
+            {
+                SaveRewardConfigDrafts();
+            }
+            GUI.enabled = true;
+        }
+
+        EndSectionCard();
+    }
+
+    void DrawNoAdsToolbar(BuildTargetGroup group, List<string> symbols)
+    {
+        bool noAdsEnabled = symbols.Contains(NoAdsSymbol);
+
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            DrawSummaryRow("当前模式", noAdsEnabled ? "无广模式" : "正常广告");
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating && !noAdsEnabled;
+                if (GUILayout.Button("启用无广模式", GUILayout.Height(24)))
+                {
+                    SetNoAdsMode(group, true);
+                }
+
+                GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating && noAdsEnabled;
+                if (GUILayout.Button("恢复广告模式", GUILayout.Height(24)))
+                {
+                    SetNoAdsMode(group, false);
+                }
+                GUI.enabled = true;
+            }
+
+            EditorGUILayout.LabelField("通过 ADE_NO_ADS 宏统一控制。无广模式下激励广告会直接走成功回调，原有奖励照发。", sectionNoteStyle);
+        }
+    }
+
+    void DrawRewardAdeDataInfoEditor()
+    {
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField("内容参数", EditorStyles.miniBoldLabel);
+            string newShareId = EditorGUILayout.TextField("分享ID", rewardShareIdDraft);
+            if (newShareId != rewardShareIdDraft)
+            {
+                rewardShareIdDraft = newShareId;
+                rewardConfigDirty = true;
+            }
+
+            subscribeTemplateList.DoLayoutList();
+            EditorGUILayout.Space(2f);
+            feedContentList.DoLayoutList();
+
+            string newFeedRepeatContentId = EditorGUILayout.TextField("复访流内容", rewardFeedRepeatContentIdDraft);
+            if (newFeedRepeatContentId != rewardFeedRepeatContentIdDraft)
+            {
+                rewardFeedRepeatContentIdDraft = newFeedRepeatContentId;
+                rewardConfigDirty = true;
+            }
+        }
+    }
+
+    void DrawWebGLTemplateSection()
+    {
+        BeginSectionCard("WebGL Template", "模板切换");
+
+        string currentTemplate = GetCurrentWebGLTemplate();
+        List<WebGLTemplateDraft> templates = GetAvailableWebGLTemplates(currentTemplate);
+        DrawUnityStyleTemplateSelector(templates, currentTemplate);
+        EndSectionCard();
+    }
+
+    void DrawUnityStyleTemplateSelector(List<WebGLTemplateDraft> templates, string currentTemplate)
+    {
+        EditorGUILayout.LabelField("WebGL Template", EditorStyles.boldLabel);
+        EditorGUILayout.Space(4f);
+
+        int columns = Mathf.Max(1, Mathf.FloorToInt((position.width * 0.5f - 40f) / 110f));
+        for (int i = 0; i < templates.Count; i += columns)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                for (int col = 0; col < columns && i + col < templates.Count; col++)
+                {
+                    DrawUnityTemplateCard(templates[i + col], currentTemplate);
+                    if (col < columns - 1)
+                    {
+                        GUILayout.Space(10f);
+                    }
+                }
+            }
+
+            if (i + columns < templates.Count)
+            {
+                GUILayout.Space(4f);
+            }
+        }
+    }
+
+    void DrawUnityTemplateCard(WebGLTemplateDraft template, string currentTemplate)
+    {
+        bool isSelected = string.Equals(template.Value, currentTemplate, StringComparison.Ordinal);
+        GUIStyle cardStyle = isSelected ? templateCardSelectedStyle : templateCardStyle;
+
+        using (new EditorGUILayout.VerticalScope(GUILayout.Width(100f)))
+        {
+            Rect cardRect = GUILayoutUtility.GetRect(100f, 84f, GUILayout.Width(100f), GUILayout.Height(84f));
+            GUI.Box(cardRect, GUIContent.none, cardStyle);
+
+            Rect previewRect = new Rect(cardRect.x + 8f, cardRect.y + 8f, cardRect.width - 16f, 54f);
+            Texture thumbnail = template.Thumbnail ?? EditorGUIUtility.IconContent("BuildSettings.Web.Small")?.image;
+            if (thumbnail != null)
+            {
+                GUI.DrawTexture(previewRect, thumbnail, ScaleMode.ScaleToFit);
+            }
+            else
+            {
+                EditorGUI.DrawRect(previewRect, new Color(0.18f, 0.18f, 0.18f));
+            }
+
+            if (GUI.Button(cardRect, GUIContent.none, GUIStyle.none) && !isSelected)
+            {
+                SetCurrentWebGLTemplate(template.Value);
+            }
+
+            Rect labelRect = new Rect(cardRect.x + 4f, cardRect.y + 64f, cardRect.width - 8f, 16f);
+            GUI.Label(labelRect, template.DisplayName, isSelected ? templateNameSelectedStyle : templateNameStyle);
+        }
+    }
+
+    List<WebGLTemplateDraft> GetAvailableWebGLTemplates(string currentTemplate)
+    {
+        List<WebGLTemplateDraft> templates = new List<WebGLTemplateDraft>
+        {
+            new WebGLTemplateDraft("APPLICATION:Default", "Default", LoadTemplateThumbnail("APPLICATION:Default")),
+            new WebGLTemplateDraft("APPLICATION:Minimal", "Minimal", LoadTemplateThumbnail("APPLICATION:Minimal")),
+        };
+
+        if (!string.IsNullOrWhiteSpace(currentTemplate) && templates.All(item => item.Value != currentTemplate))
+        {
+            templates.Insert(0, new WebGLTemplateDraft(currentTemplate, GetTemplateDisplayName(currentTemplate), LoadTemplateThumbnail(currentTemplate)));
+        }
+
+        string projectTemplateRoot = System.IO.Path.Combine(Application.dataPath, "WebGLTemplates");
+        if (System.IO.Directory.Exists(projectTemplateRoot))
+        {
+            foreach (string directory in System.IO.Directory.GetDirectories(projectTemplateRoot))
+            {
+                string folderName = System.IO.Path.GetFileName(directory);
+                string templateValue = $"PROJECT:{folderName}";
+                if (templates.Any(item => item.Value == templateValue))
+                {
+                    continue;
+                }
+
+                templates.Add(new WebGLTemplateDraft(templateValue, folderName, LoadTemplateThumbnail(templateValue)));
+            }
+        }
+
+        return templates;
     }
 
     void DrawPackageCleanupButton(string packagePath)
@@ -541,6 +693,38 @@ public class AdeConsoleWindow : EditorWindow
         }
     }
 
+    void DrawRewardOnlyEditor()
+    {
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField("广告参数", EditorStyles.miniBoldLabel);
+            DrawAdItemDraftFields("插屏参数", interstitialAdDraft);
+            DrawAdItemDraftFields("Banner 参数", bannerAdDraft);
+            rewardAdList.DoLayoutList();
+        }
+    }
+
+    void DrawAdItemDraftFields(string title, AdItemDraft draft)
+    {
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField(title, EditorStyles.miniBoldLabel);
+            string newName = EditorGUILayout.TextField("Name", draft.Name);
+            if (newName != draft.Name)
+            {
+                draft.Name = newName;
+                rewardConfigDirty = true;
+            }
+
+            string newId = EditorGUILayout.TextField("ID", draft.Id);
+            if (newId != draft.Id)
+            {
+                draft.Id = newId;
+                rewardConfigDirty = true;
+            }
+        }
+    }
+
     void BuildStyles()
     {
         if (sectionTitleStyle != null)
@@ -573,6 +757,31 @@ public class AdeConsoleWindow : EditorWindow
             wordWrap = true,
             richText = false,
         };
+
+        templateCardStyle = new GUIStyle(EditorStyles.helpBox)
+        {
+            padding = new RectOffset(8, 8, 8, 8),
+            margin = new RectOffset(0, 0, 0, 0),
+        };
+
+        templateCardSelectedStyle = new GUIStyle(templateCardStyle);
+        templateCardSelectedStyle.normal.background = MakeSolidTexture(new Color(0.16f, 0.39f, 0.87f, 0.85f));
+
+        templateButtonStyle = new GUIStyle(EditorStyles.miniButton)
+        {
+            alignment = TextAnchor.MiddleCenter,
+        };
+
+        templateNameStyle = new GUIStyle(EditorStyles.miniLabel)
+        {
+            alignment = TextAnchor.MiddleCenter,
+        };
+
+        templateNameSelectedStyle = new GUIStyle(EditorStyles.whiteMiniLabel)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            fontStyle = FontStyle.Bold,
+        };
     }
 
     void BeginSectionCard(string title, string subtitle)
@@ -583,7 +792,7 @@ public class AdeConsoleWindow : EditorWindow
         {
             EditorGUILayout.LabelField(subtitle, sectionNoteStyle);
         }
-        EditorGUILayout.Space(6f);
+        EditorGUILayout.Space(2f);
     }
 
     void EndSectionCard()
@@ -600,11 +809,370 @@ public class AdeConsoleWindow : EditorWindow
         }
     }
 
+    bool DrawInnerFoldout(bool expanded, string label)
+    {
+        Rect rect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight + 2f);
+        expanded = EditorGUI.Foldout(rect, expanded, label, true, EditorStyles.foldoutHeader);
+        return expanded;
+    }
+
     void SaveSerializedChanges(SerializedObject serializedObject, UnityEngine.Object asset)
     {
-        serializedObject.ApplyModifiedPropertiesWithoutUndo();
+        if (!serializedObject.ApplyModifiedProperties())
+        {
+            return;
+        }
+
+        EditorUtility.SetDirty(asset);
+        AssetDatabase.SaveAssets();
+        AssetDatabase.ImportAsset(AssetDatabase.GetAssetPath(asset));
+        serializedObject.UpdateIfRequiredOrScript();
+    }
+
+    Texture2D MakeSolidTexture(Color color)
+    {
+        Texture2D texture = new Texture2D(1, 1);
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        texture.SetPixel(0, 0, color);
+        texture.Apply();
+        return texture;
+    }
+
+    ReorderableList CreateStringListEditor(List<string> list, string header)
+    {
+        var reorderableList = new ReorderableList(list, typeof(string), true, true, true, true);
+        reorderableList.drawHeaderCallback = rect => EditorGUI.LabelField(rect, header);
+        reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        {
+            rect.y += 1f;
+            rect.height = EditorGUIUtility.singleLineHeight;
+            string updatedValue = EditorGUI.TextField(rect, list[index] ?? string.Empty);
+            if (updatedValue != list[index])
+            {
+                list[index] = updatedValue;
+                rewardConfigDirty = true;
+            }
+        };
+        reorderableList.onAddCallback = _ =>
+        {
+            list.Add(string.Empty);
+            rewardConfigDirty = true;
+        };
+        reorderableList.onRemoveCallback = reorderable =>
+        {
+            if (reorderable.index < 0 || reorderable.index >= list.Count)
+            {
+                return;
+            }
+
+            list.RemoveAt(reorderable.index);
+            rewardConfigDirty = true;
+        };
+        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight + 4f;
+        reorderableList.footerHeight = 22f;
+        return reorderableList;
+    }
+
+    ReorderableList CreateAdItemListEditor(List<AdItemDraft> list, string header)
+    {
+        var reorderableList = new ReorderableList(list, typeof(AdItemDraft), true, true, true, true);
+        reorderableList.drawHeaderCallback = rect => EditorGUI.LabelField(rect, header);
+        reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        {
+            if (index < 0 || index >= list.Count)
+            {
+                return;
+            }
+
+            AdItemDraft item = list[index];
+            Rect nameRect = new Rect(rect.x, rect.y + 2f, rect.width, EditorGUIUtility.singleLineHeight);
+            Rect idRect = new Rect(rect.x, rect.y + EditorGUIUtility.singleLineHeight + 6f, rect.width, EditorGUIUtility.singleLineHeight);
+
+            string newName = EditorGUI.TextField(nameRect, "Name", item.Name);
+            if (newName != item.Name)
+            {
+                item.Name = newName;
+                rewardConfigDirty = true;
+            }
+
+            string newId = EditorGUI.TextField(idRect, "ID", item.Id);
+            if (newId != item.Id)
+            {
+                item.Id = newId;
+                rewardConfigDirty = true;
+            }
+        };
+        reorderableList.onAddCallback = _ =>
+        {
+            list.Add(new AdItemDraft { Name = "激励", Id = string.Empty });
+            rewardConfigDirty = true;
+        };
+        reorderableList.onRemoveCallback = reorderable =>
+        {
+            if (reorderable.index < 0 || reorderable.index >= list.Count)
+            {
+                return;
+            }
+
+            list.RemoveAt(reorderable.index);
+            rewardConfigDirty = true;
+        };
+        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight * 2f + 10f;
+        reorderableList.footerHeight = 22f;
+        return reorderableList;
+    }
+
+    void SaveReflectedAssetChanges(UnityEngine.Object asset)
+    {
         EditorUtility.SetDirty(asset);
         AssetDatabase.SaveAssetIfDirty(asset);
+    }
+
+    void NormalizeAssetLists(UnityEngine.Object asset)
+    {
+        if (asset == null)
+        {
+            return;
+        }
+
+        Type assetType = asset.GetType();
+        if (assetType.Name == "AdeDataInfo")
+        {
+            NormalizeStringListField(asset, "SubscribeTmplIds");
+            NormalizeStringListField(asset, "FeedContentIDs");
+            return;
+        }
+
+        if (assetType.Name == "AdsData")
+        {
+            NormalizeRewardArray(asset);
+        }
+    }
+
+    void NormalizeStringListField(UnityEngine.Object asset, string fieldName)
+    {
+        var field = asset.GetType().GetField(fieldName);
+        if (field == null)
+        {
+            return;
+        }
+
+        if (!(field.GetValue(asset) is List<string> values))
+        {
+            return;
+        }
+
+        if (EditorGUIUtility.editingTextField)
+        {
+            return;
+        }
+
+        List<string> normalized = values
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct()
+            .ToList();
+
+        if (normalized.Count == values.Count && normalized.SequenceEqual(values))
+        {
+            return;
+        }
+
+        field.SetValue(asset, normalized);
+        EditorUtility.SetDirty(asset);
+    }
+
+    void NormalizeRewardArray(UnityEngine.Object adsData)
+    {
+        var adDataField = adsData.GetType().GetField("AdData");
+        if (adDataField == null)
+        {
+            return;
+        }
+
+        object adDataValue = adDataField.GetValue(adsData);
+        if (adDataValue == null)
+        {
+            return;
+        }
+
+        var rewardField = adDataValue.GetType().GetField("RewardID");
+        if (rewardField == null)
+        {
+            return;
+        }
+
+        if (!(rewardField.GetValue(adDataValue) is Array rewardArray))
+        {
+            return;
+        }
+
+        if (EditorGUIUtility.editingTextField)
+        {
+            return;
+        }
+
+        Type adItemType = FindType("AdItemData");
+        if (adItemType == null)
+        {
+            return;
+        }
+
+        var nameField = adItemType.GetField("name");
+        var idField = adItemType.GetField("ID");
+        if (nameField == null || idField == null)
+        {
+            return;
+        }
+
+        List<object> validItems = new List<object>();
+        foreach (object item in rewardArray)
+        {
+            if (item == null)
+            {
+                continue;
+            }
+
+            string nameValue = (nameField.GetValue(item) as string)?.Trim();
+            string idValue = (idField.GetValue(item) as string)?.Trim();
+
+            if (string.IsNullOrWhiteSpace(nameValue) && string.IsNullOrWhiteSpace(idValue))
+            {
+                continue;
+            }
+
+            nameField.SetValue(item, nameValue ?? string.Empty);
+            idField.SetValue(item, idValue ?? string.Empty);
+            validItems.Add(item);
+        }
+
+        if (validItems.Count == rewardArray.Length)
+        {
+            return;
+        }
+
+        Array normalizedArray = Array.CreateInstance(adItemType, validItems.Count);
+        for (int i = 0; i < validItems.Count; i++)
+        {
+            normalizedArray.SetValue(validItems[i], i);
+        }
+
+        rewardField.SetValue(adDataValue, normalizedArray);
+        EditorUtility.SetDirty(adsData);
+    }
+
+    string GetStringFieldValue(object target, string fieldName)
+    {
+        return GetFieldValue(target, fieldName) as string ?? string.Empty;
+    }
+
+    object GetFieldValue(object target, string fieldName)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        var field = target.GetType().GetField(fieldName);
+        return field?.GetValue(target);
+    }
+
+    void SetFieldValue(object target, string fieldName, object value)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        var field = target.GetType().GetField(fieldName);
+        field?.SetValue(target, value);
+    }
+
+    List<string> GetOrCreateStringListField(UnityEngine.Object asset, string fieldName)
+    {
+        var field = asset.GetType().GetField(fieldName);
+        if (field == null)
+        {
+            return new List<string>();
+        }
+
+        if (field.GetValue(asset) is List<string> values)
+        {
+            return values;
+        }
+
+        values = new List<string>();
+        field.SetValue(asset, values);
+        return values;
+    }
+
+    List<object> GetRewardItems(object adDataValue)
+    {
+        List<object> items = new List<object>();
+        if (adDataValue == null)
+        {
+            return items;
+        }
+
+        var rewardField = adDataValue.GetType().GetField("RewardID");
+        if (rewardField == null)
+        {
+            return items;
+        }
+
+        if (!(rewardField.GetValue(adDataValue) is Array rewardArray))
+        {
+            return items;
+        }
+
+        foreach (object item in rewardArray)
+        {
+            items.Add(item);
+        }
+
+        return items;
+    }
+
+    void SetRewardItems(object adDataValue, List<object> rewardItems)
+    {
+        if (adDataValue == null)
+        {
+            return;
+        }
+
+        var rewardField = adDataValue.GetType().GetField("RewardID");
+        if (rewardField == null)
+        {
+            return;
+        }
+
+        Type adItemType = FindType("AdItemData");
+        if (adItemType == null)
+        {
+            return;
+        }
+
+        Array rewardArray = Array.CreateInstance(adItemType, rewardItems.Count);
+        for (int i = 0; i < rewardItems.Count; i++)
+        {
+            rewardArray.SetValue(rewardItems[i], i);
+        }
+
+        rewardField.SetValue(adDataValue, rewardArray);
+    }
+
+    object CreateAdItemData(string nameValue, string idValue)
+    {
+        Type adItemType = FindType("AdItemData");
+        if (adItemType == null)
+        {
+            return null;
+        }
+
+        object instance = Activator.CreateInstance(adItemType);
+        SetFieldValue(instance, "name", string.IsNullOrWhiteSpace(nameValue) ? string.Empty : nameValue.Trim());
+        SetFieldValue(instance, "ID", string.IsNullOrWhiteSpace(idValue) ? string.Empty : idValue.Trim());
+        return instance;
     }
 
     void ApplyPlatformPresetToEditor(List<string> symbols, string symbol)
@@ -699,6 +1267,386 @@ public class AdeConsoleWindow : EditorWindow
         Repaint();
     }
 
+    void SetNoAdsMode(BuildTargetGroup group, bool enabled)
+    {
+        List<string> symbols = GetSymbols(group);
+        symbols.RemoveAll(item => item == NoAdsSymbol);
+
+        if (enabled)
+        {
+            symbols.Add(NoAdsSymbol);
+        }
+
+        string defineString = BuildDefineString(symbols);
+        PlayerSettings.SetScriptingDefineSymbolsForGroup(group, defineString);
+        LoadCustomSymbols(group, symbols);
+        Debug.Log(enabled
+            ? "AdeConsole: 已启用无广模式"
+            : "AdeConsole: 已恢复广告模式");
+        Repaint();
+    }
+
+    string GetCurrentWebGLTemplate()
+    {
+        if (!System.IO.File.Exists(ProjectSettingsAssetPath))
+        {
+            return "APPLICATION:Default";
+        }
+
+        string content = System.IO.File.ReadAllText(ProjectSettingsAssetPath);
+        Match match = Regex.Match(content, @"(?m)^\s*webGLTemplate:\s*(.+)$");
+        return match.Success ? match.Groups[1].Value.Trim() : "APPLICATION:Default";
+    }
+
+    void SetCurrentWebGLTemplate(string templateValue)
+    {
+        if (!System.IO.File.Exists(ProjectSettingsAssetPath))
+        {
+            Debug.LogWarning("AdeConsole: 未找到 ProjectSettings.asset");
+            return;
+        }
+
+        string content = System.IO.File.ReadAllText(ProjectSettingsAssetPath);
+        string updated = Regex.Replace(
+            content,
+            @"(?m)^(\s*webGLTemplate:\s*).+$",
+            $"$1{templateValue}");
+
+        if (updated == content)
+        {
+            Debug.LogWarning("AdeConsole: 未找到 webGLTemplate 配置项");
+            return;
+        }
+
+        System.IO.File.WriteAllText(ProjectSettingsAssetPath, updated);
+        AssetDatabase.Refresh();
+        Debug.Log($"AdeConsole: WebGL Template 已切换为 {GetTemplateDisplayName(templateValue)}");
+    }
+
+    string GetTemplateDisplayName(string templateValue)
+    {
+        int separatorIndex = templateValue.IndexOf(':');
+        return separatorIndex >= 0 && separatorIndex < templateValue.Length - 1
+            ? templateValue.Substring(separatorIndex + 1)
+            : templateValue;
+    }
+
+    Texture2D LoadTemplateThumbnail(string templateValue)
+    {
+        string thumbnailPath = GetTemplateThumbnailPath(templateValue);
+        if (string.IsNullOrWhiteSpace(thumbnailPath) || !System.IO.File.Exists(thumbnailPath))
+        {
+            return null;
+        }
+
+        byte[] bytes = System.IO.File.ReadAllBytes(thumbnailPath);
+        Texture2D texture = new Texture2D(2, 2);
+        texture.hideFlags = HideFlags.HideAndDontSave;
+        texture.LoadImage(bytes);
+        return texture;
+    }
+
+    string GetTemplateThumbnailPath(string templateValue)
+    {
+        if (templateValue.StartsWith("APPLICATION:", StringComparison.Ordinal))
+        {
+            string templateName = GetTemplateDisplayName(templateValue);
+            return System.IO.Path.Combine(BuiltinWebGLTemplateRoot, templateName, "thumbnail.png");
+        }
+
+        if (templateValue.StartsWith("PROJECT:", StringComparison.Ordinal))
+        {
+            string templateName = GetTemplateDisplayName(templateValue);
+            return System.IO.Path.Combine(Application.dataPath, "WebGLTemplates", templateName, "thumbnail.png");
+        }
+
+        return null;
+    }
+
+    void AddLivePathPrefabToAllScenes()
+    {
+        GameObject prefab = ResolveLivePathPrefab();
+        if (prefab == null)
+        {
+            EditorUtility.DisplayDialog("未找到 Prefab", $"未找到可用预制体。\n默认路径：\n{LivePathPrefabPath}", "确定");
+            return;
+        }
+
+        string prefabPath = AssetDatabase.GetAssetPath(prefab);
+        string[] scenePaths = EditorBuildSettings.scenes
+            .Select(item => item.path)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct()
+            .ToArray();
+
+        if (scenePaths.Length == 0)
+        {
+            EditorUtility.DisplayDialog("未找到场景", "Build Settings 中没有可处理的场景。", "确定");
+            return;
+        }
+
+        bool confirmed = EditorUtility.DisplayDialog(
+            "批量添加直播路径",
+            $"将检查并处理 Build Settings 中的 {scenePaths.Length} 个场景。\n已存在该 Prefab 的场景会自动跳过。",
+            "开始",
+            "取消");
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
+        int addedCount = 0;
+        int skippedCount = 0;
+
+        try
+        {
+            foreach (string scenePath in scenePaths)
+            {
+                Scene scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                if (SceneContainsPrefab(scene, prefabPath))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                PrefabUtility.InstantiatePrefab(prefab, scene);
+                EditorSceneManager.MarkSceneDirty(scene);
+                EditorSceneManager.SaveScene(scene);
+                addedCount++;
+            }
+        }
+        finally
+        {
+            if (originalSetup != null && originalSetup.Length > 0)
+            {
+                EditorSceneManager.RestoreSceneManagerSetup(originalSetup);
+            }
+        }
+
+        EditorUtility.DisplayDialog(
+            "处理完成",
+            $"已新增 {addedCount} 个场景，跳过 {skippedCount} 个已存在场景。",
+            "确定");
+    }
+
+    void RemoveLivePathPrefabFromAllScenes()
+    {
+        GameObject prefab = ResolveLivePathPrefab();
+        if (prefab == null)
+        {
+            EditorUtility.DisplayDialog("未找到 Prefab", $"未找到可用预制体。\n默认路径：\n{LivePathPrefabPath}", "确定");
+            return;
+        }
+
+        string prefabPath = AssetDatabase.GetAssetPath(prefab);
+        string[] scenePaths = EditorBuildSettings.scenes
+            .Select(item => item.path)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct()
+            .ToArray();
+
+        if (scenePaths.Length == 0)
+        {
+            EditorUtility.DisplayDialog("未找到场景", "Build Settings 中没有可处理的场景。", "确定");
+            return;
+        }
+
+        bool confirmed = EditorUtility.DisplayDialog(
+            "批量删除直播路径",
+            $"将从 Build Settings 中的 {scenePaths.Length} 个场景里删除当前挂载预制体实例。",
+            "删除",
+            "取消");
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
+        int removedCount = 0;
+        int untouchedCount = 0;
+
+        try
+        {
+            foreach (string scenePath in scenePaths)
+            {
+                Scene scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                List<GameObject> instances = FindPrefabInstancesInScene(scene, prefabPath);
+                if (instances.Count == 0)
+                {
+                    untouchedCount++;
+                    continue;
+                }
+
+                foreach (GameObject instance in instances)
+                {
+                    Undo.DestroyObjectImmediate(instance);
+                    removedCount++;
+                }
+
+                EditorSceneManager.MarkSceneDirty(scene);
+                EditorSceneManager.SaveScene(scene);
+            }
+        }
+        finally
+        {
+            if (originalSetup != null && originalSetup.Length > 0)
+            {
+                EditorSceneManager.RestoreSceneManagerSetup(originalSetup);
+            }
+        }
+
+        EditorUtility.DisplayDialog(
+            "处理完成",
+            $"已删除 {removedCount} 个实例，{untouchedCount} 个场景未发现该预制体。",
+            "确定");
+    }
+
+    bool SceneContainsPrefab(Scene scene, string prefabPath)
+    {
+        return FindPrefabInstancesInScene(scene, prefabPath).Count > 0;
+    }
+
+    List<GameObject> FindPrefabInstancesInScene(Scene scene, string prefabPath)
+    {
+        List<GameObject> matches = new List<GameObject>();
+        HashSet<GameObject> uniqueRoots = new HashSet<GameObject>();
+
+        foreach (GameObject root in scene.GetRootGameObjects())
+        {
+            Transform[] children = root.GetComponentsInChildren<Transform>(true);
+            foreach (Transform child in children)
+            {
+                GameObject source = PrefabUtility.GetCorrespondingObjectFromSource(child.gameObject);
+                if (source == null)
+                {
+                    continue;
+                }
+
+                string sourcePath = AssetDatabase.GetAssetPath(source);
+                if (string.Equals(sourcePath, prefabPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    GameObject instanceRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(child.gameObject) ?? child.gameObject;
+                    if (uniqueRoots.Add(instanceRoot))
+                    {
+                        matches.Add(instanceRoot);
+                    }
+                }
+            }
+        }
+
+        return matches;
+    }
+
+    void LoadRewardConfigDrafts()
+    {
+        UnityEngine.Object adeDataInfo = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdeDataInfoPath);
+        if (adeDataInfo != null)
+        {
+            EnsureListField(adeDataInfo, "SubscribeTmplIds");
+            EnsureListField(adeDataInfo, "FeedContentIDs");
+            rewardShareIdDraft = GetStringFieldValue(adeDataInfo, "ShareId");
+            rewardFeedRepeatContentIdDraft = GetStringFieldValue(adeDataInfo, "FeedRepeatContentID");
+
+            subscribeTemplateDrafts.Clear();
+            subscribeTemplateDrafts.AddRange(GetOrCreateStringListField(adeDataInfo, "SubscribeTmplIds"));
+
+            feedContentDrafts.Clear();
+            feedContentDrafts.AddRange(GetOrCreateStringListField(adeDataInfo, "FeedContentIDs"));
+        }
+
+        UnityEngine.Object adsData = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdsDataPath);
+        if (adsData != null)
+        {
+            EnsureAdsDataStructure(adsData);
+            object adDataValue = GetFieldValue(adsData, "AdData");
+            LoadAdItemDraft(interstitialAdDraft, GetFieldValue(adDataValue, "InterstitialID"));
+            LoadAdItemDraft(bannerAdDraft, GetFieldValue(adDataValue, "BannerID"));
+
+            rewardAdDrafts.Clear();
+            foreach (object rewardItem in GetRewardItems(adDataValue))
+            {
+                AdItemDraft draft = new AdItemDraft();
+                LoadAdItemDraft(draft, rewardItem);
+                rewardAdDrafts.Add(draft);
+            }
+        }
+
+        rewardConfigDirty = false;
+    }
+
+    void SaveRewardConfigDrafts()
+    {
+        UnityEngine.Object adeDataInfo = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdeDataInfoPath);
+        if (adeDataInfo != null)
+        {
+            SetFieldValue(adeDataInfo, "ShareId", rewardShareIdDraft ?? string.Empty);
+            SetFieldValue(adeDataInfo, "FeedRepeatContentID", rewardFeedRepeatContentIdDraft ?? string.Empty);
+            SetFieldValue(adeDataInfo, "SubscribeTmplIds", new List<string>(subscribeTemplateDrafts));
+            SetFieldValue(adeDataInfo, "FeedContentIDs", new List<string>(feedContentDrafts));
+            SaveReflectedAssetChanges(adeDataInfo);
+        }
+
+        UnityEngine.Object adsData = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdsDataPath);
+        if (adsData != null)
+        {
+            EnsureAdsDataStructure(adsData);
+            object adDataValue = GetFieldValue(adsData, "AdData");
+            SaveAdItemDraft(interstitialAdDraft, GetFieldValue(adDataValue, "InterstitialID"));
+            SaveAdItemDraft(bannerAdDraft, GetFieldValue(adDataValue, "BannerID"));
+            SetRewardItemsFromDrafts(adDataValue, rewardAdDrafts);
+            SaveReflectedAssetChanges(adsData);
+        }
+
+        rewardConfigDirty = false;
+        Debug.Log("AdeConsole: 激励参数已保存");
+    }
+
+    void LoadAdItemDraft(AdItemDraft draft, object item)
+    {
+        draft.Name = GetStringFieldValue(item, "name");
+        draft.Id = GetStringFieldValue(item, "ID");
+    }
+
+    void SaveAdItemDraft(AdItemDraft draft, object item)
+    {
+        if (item == null)
+        {
+            return;
+        }
+
+        SetFieldValue(item, "name", draft.Name ?? string.Empty);
+        SetFieldValue(item, "ID", draft.Id ?? string.Empty);
+    }
+
+    void SetRewardItemsFromDrafts(object adDataValue, List<AdItemDraft> drafts)
+    {
+        if (adDataValue == null)
+        {
+            return;
+        }
+
+        Type adItemType = FindType("AdItemData");
+        if (adItemType == null)
+        {
+            return;
+        }
+
+        Array rewardArray = Array.CreateInstance(adItemType, drafts.Count);
+        for (int i = 0; i < drafts.Count; i++)
+        {
+            object rewardItem = Activator.CreateInstance(adItemType);
+            SetFieldValue(rewardItem, "name", drafts[i].Name ?? string.Empty);
+            SetFieldValue(rewardItem, "ID", drafts[i].Id ?? string.Empty);
+            rewardArray.SetValue(rewardItem, i);
+        }
+
+        var rewardField = adDataValue.GetType().GetField("RewardID");
+        rewardField?.SetValue(adDataValue, rewardArray);
+    }
+
     void LoadFeedLaunchMode()
     {
         cachedFeedLaunchMode = (FeedLaunchMode)PlayerPrefs.GetInt(
@@ -719,6 +1667,17 @@ public class AdeConsoleWindow : EditorWindow
             cachedFeedLaunchMode = currentMode;
             selectedFeedLaunchMode = currentMode;
         }
+    }
+
+    GameObject ResolveLivePathPrefab()
+    {
+        if (livePathPrefabOverride != null)
+        {
+            return livePathPrefabOverride;
+        }
+
+        livePathPrefabOverride = AssetDatabase.LoadAssetAtPath<GameObject>(LivePathPrefabPath);
+        return livePathPrefabOverride;
     }
 
     void SaveFeedLaunchMode()
@@ -1111,6 +2070,26 @@ public class AdeConsoleWindow : EditorWindow
             Label = label;
             Symbol = symbol;
             Description = description;
+        }
+    }
+
+    class AdItemDraft
+    {
+        public string Name = string.Empty;
+        public string Id = string.Empty;
+    }
+
+    class WebGLTemplateDraft
+    {
+        public string Value;
+        public string DisplayName;
+        public Texture2D Thumbnail;
+
+        public WebGLTemplateDraft(string value, string displayName, Texture2D thumbnail)
+        {
+            Value = value;
+            DisplayName = displayName;
+            Thumbnail = thumbnail;
         }
     }
 }

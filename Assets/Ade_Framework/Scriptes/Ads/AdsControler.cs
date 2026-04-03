@@ -30,6 +30,9 @@ namespace Ade_Framework
         BannerAd _BannerAd;
         public void Init()
         {
+#if ADE_NO_ADS
+            return;
+#endif
 #if !Ade_TT && !Ade_WX
             adsData = Resources.Load<AdsData>("ScriptableObject/AdsData");
             adsPlatformData = adsData.AdData;

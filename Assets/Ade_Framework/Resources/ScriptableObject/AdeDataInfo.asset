@@ -13,7 +13,6 @@ MonoBehaviour:
   m_Name: AdeDataInfo
   m_EditorClassIdentifier: 
   ShareId: 
-  SubscribeTmplIds:
-  - crGwSMql_dFhTUEr1Fx8gs6M8sxoMCQLhFEnD_FokOM
+  SubscribeTmplIds: []
   FeedContentIDs: []
-  FeedRepeatContentID: 1
+  FeedRepeatContentID: 

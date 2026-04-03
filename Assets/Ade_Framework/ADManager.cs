@@ -19,11 +19,16 @@ public class ADManager : Single<ADManager>
     /// <exception cref="ArgumentOutOfRangeException"></exception>
     public void ShowWhiteAd()
     {
+#if ADE_NO_ADS
+        Debug.Log("ADManager: 无广模式，跳过插屏广告");
+        return;
+#else
         Debug.Log(AdsControler.Instance);
 #if UNITY_EDITOR
         
 #else
         AdsControler.Instance.ShowInterstitiaAd();
+#endif
 #endif
     }
 
@@ -39,6 +44,11 @@ public class ADManager : Single<ADManager>
 
     public void ShowRewardAD(Action onSuccess, Action onFailure = null)
     {
+#if ADE_NO_ADS
+        Debug.Log("ADManager: 无广模式，直接视为激励成功");
+        onSuccess?.Invoke();
+        return;
+#else
 #if UNITY_EDITOR
         onSuccess?.Invoke();
 #else
@@ -63,9 +73,25 @@ public class ADManager : Single<ADManager>
                 }
             });
 #endif
+#endif
 
     }
 
-    public void ShowBanner() { AdsControler.Instance.ShowBanner(); }
-    public void HideBanner() { AdsControler.Instance.HideBanner(); }
+    public void ShowBanner()
+    {
+#if ADE_NO_ADS
+        Debug.Log("ADManager: 无广模式，跳过显示 Banner");
+#else
+        AdsControler.Instance.ShowBanner();
+#endif
+    }
+
+    public void HideBanner()
+    {
+#if ADE_NO_ADS
+        Debug.Log("ADManager: 无广模式，Banner 无需隐藏");
+#else
+        AdsControler.Instance.HideBanner();
+#endif
+    }
 }
