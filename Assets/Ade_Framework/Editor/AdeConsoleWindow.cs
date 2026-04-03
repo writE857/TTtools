@@ -27,20 +27,6 @@ public class AdeConsoleWindow : EditorWindow
         "UNITY_EDITOR",
     };
 
-    static readonly string[] BgdtImportedAssets =
-    {
-        "Assets/Plugins/ByteGame/com.bytedance.bgdt",
-    };
-
-    static readonly string[] MinigameImportedAssets =
-    {
-        "Assets/WX-WASM-SDK-V2",
-        "Assets/WebGLTemplates/WXTemplate",
-        "Assets/WebGLTemplates/WXTemplate2020",
-        "Assets/WebGLTemplates/WXTemplate2022",
-        "Assets/WebGLTemplates/WXTemplate2022TJ",
-    };
-
     readonly PlatformPreset[] presets =
     {
         new PlatformPreset("编辑器/无平台宏", string.Empty, "清理平台宏，保留其他自定义宏"),
@@ -60,6 +46,11 @@ public class AdeConsoleWindow : EditorWindow
     FeedLaunchMode cachedFeedLaunchMode;
     readonly List<string> editableCustomSymbols = new();
     ReorderableList customSymbolList;
+    GUIStyle sectionTitleStyle;
+    GUIStyle sectionNoteStyle;
+    GUIStyle summaryLabelStyle;
+    GUIStyle summaryValueStyle;
+    GUIStyle pathLabelStyle;
 
     [MenuItem("Ade_Tools/Ade 控制台")]
     public static void OpenWindow()
@@ -69,7 +60,9 @@ public class AdeConsoleWindow : EditorWindow
 
     void OnEnable()
     {
+        minSize = new Vector2(720f, 520f);
         LoadFeedLaunchMode();
+        BuildStyles();
         customSymbolList = new ReorderableList(editableCustomSymbols, typeof(string), true, true, true, true);
         customSymbolList.drawHeaderCallback = rect =>
         {
@@ -85,6 +78,8 @@ public class AdeConsoleWindow : EditorWindow
                 return;
             }
 
+            rect.x += 6f;
+            rect.width -= 6f;
             string updatedSymbol = EditorGUI.TextField(rect, editableCustomSymbols[index]);
             if (updatedSymbol != editableCustomSymbols[index])
             {
@@ -116,10 +111,13 @@ public class AdeConsoleWindow : EditorWindow
                 list.index = Mathf.Clamp(list.index - 1, 0, editableCustomSymbols.Count - 1);
             }
         };
+        customSymbolList.footerHeight = 22f;
+        customSymbolList.elementHeight = EditorGUIUtility.singleLineHeight + 6f;
     }
 
     void OnGUI()
     {
+        BuildStyles();
         BuildTargetGroup group = EditorUserBuildSettings.selectedBuildTargetGroup;
         List<string> symbols = GetSymbols(group);
 
@@ -156,11 +154,12 @@ public class AdeConsoleWindow : EditorWindow
 
     void DrawHeader(BuildTargetGroup group, List<string> symbols)
     {
-        EditorGUILayout.LabelField("Ade 框架总控", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("宏定义统一在下方列表里维护，可直接增删改后应用。", MessageType.Info);
-        EditorGUILayout.LabelField("当前平台组", group.ToString());
-        EditorGUILayout.LabelField("当前平台宏", GetCurrentPlatformSymbol(symbols));
-        EditorGUILayout.LabelField("当前宏列表", symbols.Count > 0 ? string.Join("; ", symbols) : "无");
+        BeginSectionCard("概览", "平台、宏与启动状态");
+        EditorGUILayout.HelpBox("宏定义、普通宏、推荐流启动模式都集中在下方维护。", MessageType.Info);
+        DrawSummaryRow("当前平台组", group.ToString());
+        DrawSummaryRow("当前平台宏", GetCurrentPlatformSymbol(symbols));
+        DrawSummaryRow("当前宏列表", symbols.Count > 0 ? string.Join("; ", symbols) : "无");
+        EndSectionCard();
     }
 
     void DrawDefineSection(BuildTargetGroup group, List<string> symbols)
@@ -168,14 +167,13 @@ public class AdeConsoleWindow : EditorWindow
         SyncCustomSymbols(group, symbols);
         SyncFeedLaunchMode();
 
-        EditorGUILayout.LabelField("宏定义与启动选项", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("平台宏、普通宏、推荐流启动模拟都在这里统一管理。", MessageType.None);
+        BeginSectionCard("宏与启动", "平台预设、推荐流模拟、宏列表");
 
         string[] presetLabels = GetPlatformPresetLabels();
         selectedPlatformPresetIndex = GetCurrentPresetIndex(symbols);
         using (new EditorGUILayout.HorizontalScope())
         {
-            EditorGUILayout.PrefixLabel("平台预设");
+            GUILayout.Label("平台预设", summaryLabelStyle, GUILayout.Width(90f));
             int nextPresetIndex = EditorGUILayout.Popup(selectedPlatformPresetIndex, presetLabels);
             if (nextPresetIndex != selectedPlatformPresetIndex)
             {
@@ -186,18 +184,16 @@ public class AdeConsoleWindow : EditorWindow
                 }
             }
         }
-        if (selectedPlatformPresetIndex < presets.Length)
-        {
-            EditorGUILayout.LabelField(presets[selectedPlatformPresetIndex].Description, EditorStyles.miniLabel);
-        }
-        else
-        {
-            EditorGUILayout.LabelField("当前宏不是内置平台预设，可直接在下方列表继续编辑。", EditorStyles.miniLabel);
-        }
+        string presetDescription = selectedPlatformPresetIndex < presets.Length
+            ? presets[selectedPlatformPresetIndex].Description
+            : "当前宏不是内置平台预设，可直接在下方列表继续编辑。";
+        EditorGUILayout.LabelField(presetDescription, sectionNoteStyle);
+
+        EditorGUILayout.Space(6f);
 
         using (new EditorGUILayout.HorizontalScope())
         {
-            EditorGUILayout.PrefixLabel("推荐流启动模拟");
+            GUILayout.Label("推荐流模式", summaryLabelStyle, GUILayout.Width(90f));
             string[] launchModeLabels = { "正常启动", "复访启动", "获客启动" };
             FeedLaunchMode[] launchModeValues =
             {
@@ -215,10 +211,12 @@ public class AdeConsoleWindow : EditorWindow
                 launchModeDirty = selectedFeedLaunchMode != cachedFeedLaunchMode;
             }
         }
-        EditorGUILayout.LabelField($"当前模拟模式: {GetFeedLaunchModeLabel(selectedFeedLaunchMode)}", EditorStyles.miniLabel);
+        EditorGUILayout.LabelField($"当前模拟模式: {GetFeedLaunchModeLabel(selectedFeedLaunchMode)}", sectionNoteStyle);
 
+        EditorGUILayout.Space(8f);
         customSymbolList.DoLayoutList();
 
+        EditorGUILayout.Space(4f);
         using (new EditorGUILayout.HorizontalScope())
         {
             if (GUILayout.Button("复制宏", GUILayout.Height(24)))
@@ -242,15 +240,14 @@ public class AdeConsoleWindow : EditorWindow
             GUI.enabled = true;
         }
 
-        EditorGUILayout.LabelField(
-            "预览结果",
-            BuildDefineString(GetSanitizedCustomSymbols(false)),
-            EditorStyles.wordWrappedMiniLabel);
+        EditorGUILayout.Space(6f);
+        DrawSummaryRow("预览结果", BuildDefineString(GetSanitizedCustomSymbols(false)));
+        EndSectionCard();
     }
 
     void DrawResourceSection()
     {
-        EditorGUILayout.LabelField("配置资源", EditorStyles.boldLabel);
+        BeginSectionCard("配置资源", "资源路径与基础配置");
 
         UnityEngine.Object adeDataInfo = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdeDataInfoPath);
         DrawAssetBlock(
@@ -279,11 +276,13 @@ public class AdeConsoleWindow : EditorWindow
         {
             DrawAdsDataEditor(adsData);
         }
+
+        EndSectionCard();
     }
 
     void DrawShortcutSection()
     {
-        EditorGUILayout.LabelField("快捷定位", EditorStyles.boldLabel);
+        BeginSectionCard("快捷脚本", "常用入口定位");
 
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -291,15 +290,18 @@ public class AdeConsoleWindow : EditorWindow
             DrawScriptPingButton("ADManager", ADManagerScriptPath);
             DrawScriptPingButton("DebugAd", DebugAdScriptPath);
         }
+
+        EndSectionCard();
     }
 
     void DrawPlayModeSection()
     {
-        EditorGUILayout.LabelField("运行时快捷操作", EditorStyles.boldLabel);
+        BeginSectionCard("运行时操作", "Play Mode 下可用");
 
         if (!EditorApplication.isPlaying)
         {
             EditorGUILayout.HelpBox("进入 Play Mode 后，这里会显示常用测试按钮。", MessageType.None);
+            EndSectionCard();
             return;
         }
 
@@ -371,36 +373,38 @@ public class AdeConsoleWindow : EditorWindow
                 TriggerFeedFromConsole();
             }
         }
+
+        EndSectionCard();
     }
 
     void DrawAssetBlock(string label, string expectedPath, UnityEngine.Object fixedPathAsset, string otherAssetPath, Action createAction)
     {
-        EditorGUILayout.LabelField(label, EditorStyles.miniBoldLabel);
-        EditorGUILayout.LabelField("固定路径", expectedPath, EditorStyles.wordWrappedMiniLabel);
-
-        using (new EditorGUILayout.HorizontalScope())
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
-            using (new EditorGUI.DisabledScope(true))
+            EditorGUILayout.LabelField(label, EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(expectedPath, pathLabelStyle);
+
+            using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.ObjectField(fixedPathAsset, typeof(UnityEngine.Object), false);
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    EditorGUILayout.ObjectField(fixedPathAsset, typeof(UnityEngine.Object), false);
+                }
+
+                if (fixedPathAsset == null && GUILayout.Button("创建", GUILayout.Width(72f)))
+                {
+                    createAction?.Invoke();
+                }
             }
 
-            if (fixedPathAsset != null)
+            if (fixedPathAsset == null && !string.IsNullOrEmpty(otherAssetPath))
             {
+                EditorGUILayout.HelpBox($"已找到同类型资源，但不在固定路径下:\n{otherAssetPath}", MessageType.Warning);
             }
-            else if (GUILayout.Button("创建", GUILayout.Width(60)))
+            else if (fixedPathAsset == null)
             {
-                createAction?.Invoke();
+                EditorGUILayout.HelpBox("固定路径下未找到资源。", MessageType.Warning);
             }
-        }
-
-        if (fixedPathAsset == null && !string.IsNullOrEmpty(otherAssetPath))
-        {
-            EditorGUILayout.HelpBox($"已找到同类型资源，但不在固定路径下:\n{otherAssetPath}", MessageType.Warning);
-        }
-        else if (fixedPathAsset == null)
-        {
-            EditorGUILayout.HelpBox("固定路径下未找到资源。", MessageType.Warning);
         }
     }
 
@@ -422,22 +426,19 @@ public class AdeConsoleWindow : EditorWindow
 
     void DrawPackageCleanupSection()
     {
-        EditorGUILayout.LabelField("包清理", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("删除指定 unitypackage 已导入到工程内的内容。删除前会弹确认框。", MessageType.Warning);
+        BeginSectionCard("包清理", "按包文件名识别清理目标");
+        EditorGUILayout.HelpBox("按包文件名识别清理目标。ByteGame 相关包会直接清理整个 Assets/Plugins/ByteGame。", MessageType.Warning);
 
-        DrawPackageCleanupButton(
-            "删除 bgdt 包内容",
-            BgdtPackagePath,
-            BgdtImportedAssets);
-
-        DrawPackageCleanupButton(
-            "删除 minigame 包内容",
-            MinigamePackagePath,
-            MinigameImportedAssets);
+        DrawPackageCleanupButton(BgdtPackagePath);
+        DrawPackageCleanupButton(MinigamePackagePath);
+        EndSectionCard();
     }
 
-    void DrawPackageCleanupButton(string buttonLabel, string packagePath, string[] importedAssets)
+    void DrawPackageCleanupButton(string packagePath)
     {
+        string[] importedAssets = GetImportedAssetsByPackageFileName(packagePath);
+        string buttonLabel = GetCleanupButtonLabel(packagePath);
+
         using (new EditorGUILayout.HorizontalScope())
         {
             GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating;
@@ -453,6 +454,48 @@ public class AdeConsoleWindow : EditorWindow
         }
     }
 
+    string[] GetImportedAssetsByPackageFileName(string packagePath)
+    {
+        string fileName = System.IO.Path.GetFileName(packagePath).ToLowerInvariant();
+        if (fileName.Contains("bgdt") || fileName.Contains("bytedance"))
+        {
+            return new[]
+            {
+                "Assets/Plugins/ByteGame",
+            };
+        }
+
+        if (fileName.Contains("minigame"))
+        {
+            return new[]
+            {
+                "Assets/WX-WASM-SDK-V2",
+                "Assets/WebGLTemplates/WXTemplate",
+                "Assets/WebGLTemplates/WXTemplate2020",
+                "Assets/WebGLTemplates/WXTemplate2022",
+                "Assets/WebGLTemplates/WXTemplate2022TJ",
+            };
+        }
+
+        return Array.Empty<string>();
+    }
+
+    string GetCleanupButtonLabel(string packagePath)
+    {
+        string fileName = System.IO.Path.GetFileName(packagePath).ToLowerInvariant();
+        if (fileName.Contains("bgdt") || fileName.Contains("bytedance"))
+        {
+            return "清理 ByteGame 文件夹";
+        }
+
+        if (fileName.Contains("minigame"))
+        {
+            return "清理 minigame 导入内容";
+        }
+
+        return $"清理 {System.IO.Path.GetFileNameWithoutExtension(packagePath)}";
+    }
+
     void DrawAdeDataInfoEditor(UnityEngine.Object adeDataInfo)
     {
         EnsureListField(adeDataInfo, "SubscribeTmplIds");
@@ -463,7 +506,7 @@ public class AdeConsoleWindow : EditorWindow
 
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
-            EditorGUILayout.LabelField("AdeDataInfo", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField("内容配置", EditorStyles.miniBoldLabel);
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(serializedObject.FindProperty("ShareId"), new GUIContent("ShareId"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("SubscribeTmplIds"), new GUIContent("订阅模板"), true);
@@ -486,7 +529,7 @@ public class AdeConsoleWindow : EditorWindow
 
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
-            EditorGUILayout.LabelField("AdsData", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField("广告配置", EditorStyles.miniBoldLabel);
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(adDataProperty.FindPropertyRelative("InterstitialID"), new GUIContent("插屏广告"), true);
             EditorGUILayout.PropertyField(adDataProperty.FindPropertyRelative("BannerID"), new GUIContent("Banner 广告"), true);
@@ -495,6 +538,65 @@ public class AdeConsoleWindow : EditorWindow
             {
                 SaveSerializedChanges(serializedObject, adsData);
             }
+        }
+    }
+
+    void BuildStyles()
+    {
+        if (sectionTitleStyle != null)
+        {
+            return;
+        }
+
+        sectionTitleStyle = new GUIStyle(EditorStyles.boldLabel)
+        {
+            fontSize = 12,
+        };
+
+        sectionNoteStyle = new GUIStyle(EditorStyles.miniLabel)
+        {
+            wordWrap = true,
+        };
+
+        summaryLabelStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+        {
+            alignment = TextAnchor.MiddleLeft,
+        };
+
+        summaryValueStyle = new GUIStyle(EditorStyles.label)
+        {
+            wordWrap = true,
+        };
+
+        pathLabelStyle = new GUIStyle(EditorStyles.miniLabel)
+        {
+            wordWrap = true,
+            richText = false,
+        };
+    }
+
+    void BeginSectionCard(string title, string subtitle)
+    {
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.LabelField(title, sectionTitleStyle);
+        if (!string.IsNullOrEmpty(subtitle))
+        {
+            EditorGUILayout.LabelField(subtitle, sectionNoteStyle);
+        }
+        EditorGUILayout.Space(6f);
+    }
+
+    void EndSectionCard()
+    {
+        EditorGUILayout.EndVertical();
+    }
+
+    void DrawSummaryRow(string label, string value)
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            GUILayout.Label(label, summaryLabelStyle, GUILayout.Width(90f));
+            EditorGUILayout.LabelField(string.IsNullOrEmpty(value) ? "无" : value, summaryValueStyle);
         }
     }
 
