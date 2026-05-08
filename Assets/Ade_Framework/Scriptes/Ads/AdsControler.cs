@@ -945,7 +945,7 @@ public class GridAd
         {
             LogManager.Log($"格子广告加载成功:{gridData.AdUnitId}");
         });
-        customGridAd.OnError((WXADLoadResponse res) =>
+        customGridAd.OnError((WXADErrorResponse res) =>
         {
             LogManager.LogError($"格子广告加载失败:{gridData.AdUnitId}_{res.errMsg}");
         });
