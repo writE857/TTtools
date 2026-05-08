@@ -81,6 +81,8 @@ public class AdeConsoleWindow : EditorWindow
     ReorderableList rewardAdList;
     ReorderableList gridAdList;
     ReorderableList livePathSceneTextList;
+    ListSelectionState activeListSelection;
+    ReorderableList activeReorderableList;
     GUIStyle sectionTitleStyle;
     GUIStyle sectionNoteStyle;
     GUIStyle summaryLabelStyle;
@@ -221,6 +223,31 @@ public class AdeConsoleWindow : EditorWindow
             currentEvent.Use();
             GUIUtility.ExitGUI();
         }
+
+        if (currentEvent.keyCode == KeyCode.A && SelectAllActiveList())
+        {
+            currentEvent.Use();
+            GUIUtility.ExitGUI();
+        }
+    }
+
+    bool SelectAllActiveList()
+    {
+        if (EditorGUIUtility.editingTextField || activeListSelection == null || activeReorderableList?.list == null)
+        {
+            return false;
+        }
+
+        int itemCount = activeReorderableList.list.Count;
+        if (itemCount <= 0)
+        {
+            return false;
+        }
+
+        activeListSelection.SelectAll(itemCount);
+        activeReorderableList.index = 0;
+        Repaint();
+        return true;
     }
 
     void SaveAllPendingEditorDrafts(BuildTargetGroup group)
@@ -3055,6 +3082,23 @@ public class AdeConsoleWindow : EditorWindow
             }
         }
 
+        public void SelectAll(int itemCount)
+        {
+            selectedIndices.Clear();
+            if (itemCount <= 0)
+            {
+                anchorIndex = -1;
+                return;
+            }
+
+            for (int i = 0; i < itemCount; i++)
+            {
+                selectedIndices.Add(i);
+            }
+
+            anchorIndex = 0;
+        }
+
         public List<int> GetSelectedIndicesDescending()
         {
             return selectedIndices.OrderByDescending(i => i).ToList();
@@ -3120,7 +3164,14 @@ public class AdeConsoleWindow : EditorWindow
         bool ctrl = currentEvent.control || currentEvent.command;
         bool shift = currentEvent.shift;
         bool clickedSelectionHandle = selectionRect.Contains(currentEvent.mousePosition);
-        bool clickedModifiedRow = (ctrl || shift) && rowRect.Contains(currentEvent.mousePosition);
+        bool clickedRow = rowRect.Contains(currentEvent.mousePosition);
+        if (clickedRow)
+        {
+            activeListSelection = selection;
+            activeReorderableList = reorderableList;
+        }
+
+        bool clickedModifiedRow = (ctrl || shift) && clickedRow;
         if (!clickedSelectionHandle && !clickedModifiedRow)
         {
             return false;
