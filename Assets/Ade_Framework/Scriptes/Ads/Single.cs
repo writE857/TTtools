@@ -1,9 +1,7 @@
-using System;
-
 namespace Ade_Framework
 {
 	public class Single<T>
-		where T : class
+		where T : class, new()
 	{
 		private static T instance;
 		public static T Instance
@@ -12,8 +10,7 @@ namespace Ade_Framework
 			{
 				if (instance == null)
 				{
-					Type type = typeof(T);
-					instance = Activator.CreateInstance(type,true) as T;
+					instance = new T();
 				}
 				return instance;
 			}

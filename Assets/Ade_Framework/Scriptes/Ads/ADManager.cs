@@ -8,10 +8,6 @@ public class ADManager : Single<ADManager>
 {
     const string RewardAdName = "激励";
 
-    private ADManager()
-    {
-    }
-
     /// <summary>
     /// 显示白包广告
     /// </summary>
