@@ -111,56 +111,7 @@ public class AdeConsoleWindow : EditorWindow
             return;
         }
 
-        customSymbolList = new ReorderableList(editableCustomSymbols, typeof(string), true, true, true, true);
-        customSymbolList.drawHeaderCallback = rect =>
-        {
-            EditorGUI.LabelField(rect, "Scripting Define Symbols");
-        };
-        customSymbolList.drawElementCallback = (rect, index, isActive, isFocused) =>
-        {
-            if (index < 0 || index >= editableCustomSymbols.Count)
-            {
-                return;
-            }
-
-            Rect selectRect = GetSelectionRect(rect);
-            DrawSelectableRowBackground(rect, customSymbolSelection.IsSelected(index));
-            DrawSelectionHandle(selectRect, customSymbolSelection.IsSelected(index));
-            if (HandleSelectionClick(rect, selectRect, index, customSymbolSelection, customSymbolList))
-            {
-                return;
-            }
-
-            Rect fieldRect = GetSingleLineFieldRect(rect);
-            string updatedSymbol = EditorGUI.TextField(fieldRect, editableCustomSymbols[index]);
-            if (updatedSymbol != editableCustomSymbols[index])
-            {
-                editableCustomSymbols[index] = updatedSymbol;
-                UpdateCustomSymbolsDirty();
-            }
-        };
-        customSymbolList.onAddCallback = _ =>
-        {
-            editableCustomSymbols.Add(string.Empty);
-            customSymbolSelection.SelectSingle(editableCustomSymbols.Count - 1);
-            UpdateCustomSymbolsDirty();
-        };
-        customSymbolList.onRemoveCallback = list =>
-        {
-            if (RemoveSelectedItems(editableCustomSymbols, list, customSymbolSelection))
-            {
-                UpdateCustomSymbolsDirty();
-                return;
-            }
-        };
-        customSymbolList.onReorderCallback = list =>
-        {
-            customSymbolSelection.SelectSingle(list.index);
-            UpdateCustomSymbolsDirty();
-        };
-        customSymbolList.footerHeight = 22f;
-        customSymbolList.elementHeight = EditorGUIUtility.singleLineHeight + 6f;
-
+        customSymbolList = CreateCustomSymbolListEditor();
         subscribeTemplateList = CreateStringListEditor(subscribeTemplateDrafts, "订阅模板", subscribeTemplateSelection, () => rewardConfigDirty = true);
         feedContentList = CreateStringListEditor(feedContentDrafts, "推荐流内容", feedContentSelection, () => rewardConfigDirty = true);
         rewardAdList = CreateAdItemListEditor(rewardAdDrafts, "激励参数", rewardAdSelection);
@@ -404,6 +355,7 @@ public class AdeConsoleWindow : EditorWindow
         DrawDebugDraftMode();
 
         EditorGUILayout.Space(4f);
+        EnsureCustomSymbolListBinding();
         customSymbolList.DoLayoutList();
 
         using (new EditorGUILayout.HorizontalScope())
@@ -431,6 +383,14 @@ public class AdeConsoleWindow : EditorWindow
         EditorGUILayout.LabelField(
             $"当前: {group} / {GetCurrentPlatformSymbol(symbols)} / {symbolList}",
             sectionNoteStyle);
+    }
+
+    void EnsureCustomSymbolListBinding()
+    {
+        if (customSymbolList == null || customSymbolList.list != editableCustomSymbols)
+        {
+            customSymbolList = CreateCustomSymbolListEditor();
+        }
     }
 
     void DrawNoAdsDraftMode()
@@ -995,6 +955,59 @@ public class AdeConsoleWindow : EditorWindow
         AssetDatabase.SaveAssets();
         AssetDatabase.ImportAsset(AssetDatabase.GetAssetPath(asset));
         serializedObject.UpdateIfRequiredOrScript();
+    }
+
+    ReorderableList CreateCustomSymbolListEditor()
+    {
+        var reorderableList = new ReorderableList(editableCustomSymbols, typeof(string), true, true, true, true);
+        reorderableList.drawHeaderCallback = rect =>
+        {
+            EditorGUI.LabelField(rect, "Scripting Define Symbols");
+        };
+        reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        {
+            if (index < 0 || index >= editableCustomSymbols.Count)
+            {
+                return;
+            }
+
+            Rect selectRect = GetSelectionRect(rect);
+            DrawSelectableRowBackground(rect, customSymbolSelection.IsSelected(index));
+            DrawSelectionHandle(selectRect, customSymbolSelection.IsSelected(index));
+            if (HandleSelectionClick(rect, selectRect, index, customSymbolSelection, reorderableList))
+            {
+                return;
+            }
+
+            Rect fieldRect = GetSingleLineFieldRect(rect);
+            string updatedSymbol = EditorGUI.TextField(fieldRect, editableCustomSymbols[index]);
+            if (updatedSymbol != editableCustomSymbols[index])
+            {
+                editableCustomSymbols[index] = updatedSymbol;
+                UpdateCustomSymbolsDirty();
+            }
+        };
+        reorderableList.onAddCallback = _ =>
+        {
+            editableCustomSymbols.Add(string.Empty);
+            customSymbolSelection.SelectSingle(editableCustomSymbols.Count - 1);
+            UpdateCustomSymbolsDirty();
+        };
+        reorderableList.onRemoveCallback = list =>
+        {
+            if (RemoveSelectedItems(editableCustomSymbols, list, customSymbolSelection))
+            {
+                UpdateCustomSymbolsDirty();
+            }
+        };
+        reorderableList.onReorderCallback = list =>
+        {
+            customSymbolSelection.SelectSingle(list.index);
+            UpdateCustomSymbolsDirty();
+        };
+        reorderableList.footerHeight = 22f;
+        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight + 6f;
+        return reorderableList;
     }
 
     ReorderableList CreateStringListEditor(List<string> list, string header, ListSelectionState selection, Action onChanged)
@@ -1798,7 +1811,8 @@ public class AdeConsoleWindow : EditorWindow
             return;
         }
 
-        if (!customSymbolsDirty && cachedDefineString != defineString)
+        string editableDefineString = BuildDefineString(editableCustomSymbols);
+        if (!customSymbolsDirty && (cachedDefineString != defineString || editableDefineString != defineString))
         {
             LoadCustomSymbols(group, symbols);
         }
