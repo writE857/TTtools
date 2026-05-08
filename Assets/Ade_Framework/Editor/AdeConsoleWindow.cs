@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -7,22 +8,26 @@ using UnityEditor.SceneManagement;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 public class AdeConsoleWindow : EditorWindow
 {
     const string AdeDataInfoPath = "Assets/Ade_Framework/Resources/ScriptableObject/AdeDataInfo.asset";
     const string AdsDataPath = "Assets/Ade_Framework/Resources/ScriptableObject/AdsData.asset";
     const string EntryScriptPath = "Assets/Ade_Framework/Scriptes/1_Enter/Entry.cs";
-    const string ADManagerScriptPath = "Assets/Ade_Framework/ADManager.cs";
+    const string ADManagerScriptPath = "Assets/Ade_Framework/Scriptes/Ads/ADManager.cs";
     const string DebugAdScriptPath = "Assets/Ade_Framework/Scriptes/Debug/DebugAd.cs";
     const string ResourceFolderPath = "Assets/Ade_Framework/Resources/ScriptableObject";
-    const string FeedLaunchModePlayerPrefsKey = "Ade.Editor.FeedLaunchMode";
+    const string FeedLaunchModeEditorPrefsKey = "Ade.Editor.FeedLaunchMode";
+    const string LivePathSceneTextEditorPrefsKey = "Ade.Editor.LivePathSceneTexts";
     const string BgdtPackagePath = @"E:\UnityTools\Editor\TTtool\com.bytedance.bgdt-cp-3.0.271.unitypackage";
     const string MinigamePackagePath = @"E:\UnityTools\Editor\TTtool\minigame.202601131148.unitypackage";
     const string NoAdsSymbol = "ADE_NO_ADS";
+    const string DebugSymbol = "Ade_Debug";
     const string ProjectSettingsAssetPath = "ProjectSettings/ProjectSettings.asset";
-    const string BuiltinWebGLTemplateRoot = @"E:\UnityEditor\2021.3.21f1c1\Editor\Data\PlaybackEngines\WebGLSupport\BuildTools\WebGLTemplates";
     const string LivePathPrefabPath = "Assets/Ade_Framework/Resources/直播路径.prefab";
+    const float ListSelectHandleWidth = 16f;
+    const float ListSelectContentOffset = 18f;
 
     static readonly string[] KnownPlatformSymbols =
     {
@@ -49,30 +54,37 @@ public class AdeConsoleWindow : EditorWindow
     bool customSymbolsDirty;
     bool launchModeDirty;
     bool rewardConfigDirty;
+    bool livePathSceneTextDirty;
     int selectedPlatformPresetIndex;
     FeedLaunchMode selectedFeedLaunchMode;
     FeedLaunchMode cachedFeedLaunchMode;
     string rewardShareIdDraft = string.Empty;
     string rewardFeedRepeatContentIdDraft = string.Empty;
     [SerializeField] GameObject livePathPrefabOverride;
+    [SerializeField] List<LivePathSceneTextDraft> livePathSceneTextDrafts = new();
     readonly AdItemDraft interstitialAdDraft = new();
     readonly AdItemDraft bannerAdDraft = new();
     readonly List<string> subscribeTemplateDrafts = new();
     readonly List<string> feedContentDrafts = new();
     readonly List<AdItemDraft> rewardAdDrafts = new();
+    readonly List<GridAdDraft> gridAdDrafts = new();
     readonly List<string> editableCustomSymbols = new();
+    readonly ListSelectionState customSymbolSelection = new();
+    readonly ListSelectionState subscribeTemplateSelection = new();
+    readonly ListSelectionState feedContentSelection = new();
+    readonly ListSelectionState rewardAdSelection = new();
+    readonly ListSelectionState gridAdSelection = new();
+    readonly ListSelectionState livePathSceneTextSelection = new();
     ReorderableList customSymbolList;
     ReorderableList subscribeTemplateList;
     ReorderableList feedContentList;
     ReorderableList rewardAdList;
+    ReorderableList gridAdList;
+    ReorderableList livePathSceneTextList;
     GUIStyle sectionTitleStyle;
     GUIStyle sectionNoteStyle;
     GUIStyle summaryLabelStyle;
-    GUIStyle summaryValueStyle;
     GUIStyle pathLabelStyle;
-    GUIStyle templateCardStyle;
-    GUIStyle templateCardSelectedStyle;
-    GUIStyle templateButtonStyle;
     GUIStyle templateNameSelectedStyle;
     GUIStyle templateNameStyle;
 
@@ -86,12 +98,13 @@ public class AdeConsoleWindow : EditorWindow
     {
         minSize = new Vector2(720f, 520f);
         LoadFeedLaunchMode();
+        LoadLivePathSceneTextDrafts();
         EnsureEditorStateInitialized();
     }
 
     void EnsureEditorStateInitialized()
     {
-        if (customSymbolList != null && subscribeTemplateList != null && feedContentList != null && rewardAdList != null)
+        if (customSymbolList != null && subscribeTemplateList != null && feedContentList != null && rewardAdList != null && gridAdList != null && livePathSceneTextList != null)
         {
             return;
         }
@@ -103,53 +116,54 @@ public class AdeConsoleWindow : EditorWindow
         };
         customSymbolList.drawElementCallback = (rect, index, isActive, isFocused) =>
         {
-            rect.y += 1;
-            rect.height = EditorGUIUtility.singleLineHeight;
-
             if (index < 0 || index >= editableCustomSymbols.Count)
             {
                 return;
             }
 
-            rect.x += 6f;
-            rect.width -= 6f;
-            string updatedSymbol = EditorGUI.TextField(rect, editableCustomSymbols[index]);
+            Rect selectRect = GetSelectionRect(rect);
+            DrawSelectableRowBackground(rect, customSymbolSelection.IsSelected(index));
+            DrawSelectionHandle(selectRect, customSymbolSelection.IsSelected(index));
+            if (HandleSelectionClick(rect, selectRect, index, customSymbolSelection, customSymbolList))
+            {
+                return;
+            }
+
+            Rect fieldRect = GetSingleLineFieldRect(rect);
+            string updatedSymbol = EditorGUI.TextField(fieldRect, editableCustomSymbols[index]);
             if (updatedSymbol != editableCustomSymbols[index])
             {
                 editableCustomSymbols[index] = updatedSymbol;
-                customSymbolsDirty = true;
+                UpdateCustomSymbolsDirty();
             }
         };
         customSymbolList.onAddCallback = _ =>
         {
             editableCustomSymbols.Add(string.Empty);
-            customSymbolsDirty = true;
+            customSymbolSelection.SelectSingle(editableCustomSymbols.Count - 1);
+            UpdateCustomSymbolsDirty();
         };
         customSymbolList.onRemoveCallback = list =>
         {
-            if (list.index < 0 || list.index >= editableCustomSymbols.Count)
+            if (RemoveSelectedItems(editableCustomSymbols, list, customSymbolSelection))
             {
+                UpdateCustomSymbolsDirty();
                 return;
             }
-
-            editableCustomSymbols.RemoveAt(list.index);
-            customSymbolsDirty = true;
-
-            if (editableCustomSymbols.Count == 0)
-            {
-                list.index = -1;
-            }
-            else
-            {
-                list.index = Mathf.Clamp(list.index - 1, 0, editableCustomSymbols.Count - 1);
-            }
+        };
+        customSymbolList.onReorderCallback = list =>
+        {
+            customSymbolSelection.SelectSingle(list.index);
+            UpdateCustomSymbolsDirty();
         };
         customSymbolList.footerHeight = 22f;
         customSymbolList.elementHeight = EditorGUIUtility.singleLineHeight + 6f;
 
-        subscribeTemplateList = CreateStringListEditor(subscribeTemplateDrafts, "订阅模板");
-        feedContentList = CreateStringListEditor(feedContentDrafts, "推荐流内容");
-        rewardAdList = CreateAdItemListEditor(rewardAdDrafts, "激励参数");
+        subscribeTemplateList = CreateStringListEditor(subscribeTemplateDrafts, "订阅模板", subscribeTemplateSelection, () => rewardConfigDirty = true);
+        feedContentList = CreateStringListEditor(feedContentDrafts, "推荐流内容", feedContentSelection, () => rewardConfigDirty = true);
+        rewardAdList = CreateAdItemListEditor(rewardAdDrafts, "激励参数", rewardAdSelection);
+        gridAdList = CreateGridAdListEditor(gridAdDrafts, "格子广告参数", gridAdSelection);
+        livePathSceneTextList = CreateLivePathSceneTextListEditor();
         LoadRewardConfigDrafts();
     }
 
@@ -159,15 +173,13 @@ public class AdeConsoleWindow : EditorWindow
         BuildStyles();
         BuildTargetGroup group = EditorUserBuildSettings.selectedBuildTargetGroup;
         List<string> symbols = GetSymbols(group);
+        HandleKeyboardShortcuts(group, symbols);
         bool beganScrollView = false;
 
         try
         {
             scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
             beganScrollView = true;
-
-            DrawHeader(group, symbols);
-            EditorGUILayout.Space(12);
 
             DrawQuadrantLayout(group, symbols);
         }
@@ -188,13 +200,98 @@ public class AdeConsoleWindow : EditorWindow
         }
     }
 
-    void DrawHeader(BuildTargetGroup group, List<string> symbols)
+    void HandleKeyboardShortcuts(BuildTargetGroup group, List<string> symbols)
     {
-        BeginSectionCard("Ade 控制台", string.Empty);
-        DrawSummaryRow("当前平台组", group.ToString());
-        DrawSummaryRow("当前平台宏", GetCurrentPlatformSymbol(symbols));
-        DrawSummaryRow("当前宏列表", symbols.Count > 0 ? string.Join("; ", symbols) : "无");
-        EndSectionCard();
+        Event currentEvent = Event.current;
+        if (currentEvent.type != EventType.KeyDown || !(currentEvent.control || currentEvent.command))
+        {
+            return;
+        }
+
+        if (currentEvent.keyCode == KeyCode.S)
+        {
+            SaveAllPendingEditorDrafts(group);
+            currentEvent.Use();
+            GUIUtility.ExitGUI();
+        }
+
+        if (currentEvent.keyCode == KeyCode.Z)
+        {
+            RevertPendingEditorDrafts(group, symbols);
+            currentEvent.Use();
+            GUIUtility.ExitGUI();
+        }
+    }
+
+    void SaveAllPendingEditorDrafts(BuildTargetGroup group)
+    {
+        if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+        {
+            Debug.LogWarning("AdeConsole: Unity 正在编译或刷新资源，暂不能保存。");
+            return;
+        }
+
+        bool hasChanges = customSymbolsDirty || launchModeDirty || rewardConfigDirty || livePathSceneTextDirty;
+        if (customSymbolsDirty)
+        {
+            SaveCustomSymbols(group);
+        }
+
+        if (launchModeDirty)
+        {
+            SaveFeedLaunchMode();
+        }
+
+        if (rewardConfigDirty)
+        {
+            SaveRewardConfigDrafts();
+        }
+
+        if (livePathSceneTextDirty)
+        {
+            SaveLivePathSceneTextDrafts();
+        }
+
+        if (hasChanges)
+        {
+            AssetDatabase.SaveAssets();
+        }
+    }
+
+    void RevertPendingEditorDrafts(BuildTargetGroup group, List<string> symbols)
+    {
+        bool reverted = false;
+        if (customSymbolsDirty)
+        {
+            LoadCustomSymbols(group, symbols);
+            reverted = true;
+        }
+
+        if (launchModeDirty)
+        {
+            LoadFeedLaunchMode();
+            reverted = true;
+        }
+
+        if (rewardConfigDirty)
+        {
+            LoadRewardConfigDrafts();
+            reverted = true;
+        }
+
+        if (livePathSceneTextDirty)
+        {
+            LoadLivePathSceneTextDrafts();
+            reverted = true;
+        }
+
+        if (!reverted)
+        {
+            Undo.PerformUndo();
+            return;
+        }
+
+        Repaint();
     }
 
     void DrawQuadrantLayout(BuildTargetGroup group, List<string> symbols)
@@ -230,10 +327,11 @@ public class AdeConsoleWindow : EditorWindow
         SyncFeedLaunchMode();
 
         BeginSectionCard("宏定义", "平台预设、推荐流模拟、宏列表");
+        DrawDefineStatusLine(group, symbols);
         EditorGUILayout.LabelField("先选预设，再补充自定义宏。", sectionNoteStyle);
 
         string[] presetLabels = GetPlatformPresetLabels();
-        selectedPlatformPresetIndex = GetCurrentPresetIndex(symbols);
+        selectedPlatformPresetIndex = GetCurrentPresetIndex(editableCustomSymbols);
         using (new EditorGUILayout.HorizontalScope())
         {
             GUILayout.Label("平台预设", summaryLabelStyle, GUILayout.Width(90f));
@@ -243,7 +341,7 @@ public class AdeConsoleWindow : EditorWindow
                 selectedPlatformPresetIndex = nextPresetIndex;
                 if (selectedPlatformPresetIndex < presets.Length)
                 {
-                    ApplyPlatformPresetToEditor(symbols, presets[selectedPlatformPresetIndex].Symbol);
+                    ApplyPlatformPresetToEditor(editableCustomSymbols, presets[selectedPlatformPresetIndex].Symbol);
                 }
             }
         }
@@ -272,7 +370,11 @@ public class AdeConsoleWindow : EditorWindow
                 launchModeDirty = selectedFeedLaunchMode != cachedFeedLaunchMode;
             }
         }
-        EditorGUILayout.LabelField($"当前模拟模式: {GetFeedLaunchModeLabel(selectedFeedLaunchMode)}", sectionNoteStyle);
+        EditorGUILayout.LabelField($"当前模拟模式: {GetFeedLaunchModeLabel(selectedFeedLaunchMode)}。仅用于编辑器测试，构建包不读取。", sectionNoteStyle);
+
+        DrawNoAdsDraftMode();
+        EditorGUILayout.LabelField("广告模式通过 ADE_NO_ADS 宏控制，选择后需点击应用才写入项目。", sectionNoteStyle);
+        DrawDebugDraftMode();
 
         EditorGUILayout.Space(4f);
         customSymbolList.DoLayoutList();
@@ -282,13 +384,6 @@ public class AdeConsoleWindow : EditorWindow
             if (GUILayout.Button("复制宏", GUILayout.Height(24)))
             {
                 EditorGUIUtility.systemCopyBuffer = BuildDefineString(GetSanitizedCustomSymbols(false));
-                Debug.Log("AdeConsole: 已复制当前宏定义。");
-            }
-
-            if (GUILayout.Button("还原", GUILayout.Height(24)))
-            {
-                LoadCustomSymbols(group, symbols);
-                LoadFeedLaunchMode();
             }
 
             GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating && (customSymbolsDirty || launchModeDirty);
@@ -300,8 +395,45 @@ public class AdeConsoleWindow : EditorWindow
             GUI.enabled = true;
         }
 
-        DrawSummaryRow("预览结果", BuildDefineString(GetSanitizedCustomSymbols(false)));
         EndSectionCard();
+    }
+
+    void DrawDefineStatusLine(BuildTargetGroup group, List<string> symbols)
+    {
+        string symbolList = symbols.Count > 0 ? string.Join("; ", symbols) : "无";
+        EditorGUILayout.LabelField(
+            $"当前: {group} / {GetCurrentPlatformSymbol(symbols)} / {symbolList}",
+            sectionNoteStyle);
+    }
+
+    void DrawNoAdsDraftMode()
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            GUILayout.Label("广告模式", summaryLabelStyle, GUILayout.Width(90f));
+            bool noAdsEnabled = editableCustomSymbols.Contains(NoAdsSymbol);
+            int currentModeIndex = noAdsEnabled ? 1 : 0;
+            int nextModeIndex = GUILayout.Toolbar(currentModeIndex, new[] { "正常广告", "无广模式" }, GUILayout.Height(20f));
+            if (nextModeIndex != currentModeIndex)
+            {
+                SetNoAdsModeInEditor(nextModeIndex == 1);
+            }
+        }
+    }
+
+    void DrawDebugDraftMode()
+    {
+        Rect rowRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight + 2f);
+        rowRect.y += 1f;
+        rowRect.height = EditorGUIUtility.singleLineHeight;
+        Rect toggleRect = new Rect(rowRect.x, rowRect.y, Mathf.Min(180f, rowRect.width), rowRect.height);
+
+        bool hasDebugSymbol = editableCustomSymbols.Contains(DebugSymbol);
+        bool nextHasDebugSymbol = EditorGUI.ToggleLeft(toggleRect, "启用 Ade_Debug", hasDebugSymbol);
+        if (nextHasDebugSymbol != hasDebugSymbol)
+        {
+            SetManagedSymbol(DebugSymbol, nextHasDebugSymbol);
+        }
     }
 
     void DrawAssetBlock(string label, string expectedPath, UnityEngine.Object fixedPathAsset, string otherAssetPath, Action createAction)
@@ -357,9 +489,6 @@ public class AdeConsoleWindow : EditorWindow
         EditorGUILayout.LabelField("ByteGame 相关包会直接清理整个 Assets/Plugins/ByteGame。", sectionNoteStyle);
         EditorGUILayout.Space(4f);
 
-        DrawNoAdsToolbar(EditorUserBuildSettings.selectedBuildTargetGroup, GetSymbols(EditorUserBuildSettings.selectedBuildTargetGroup));
-        EditorGUILayout.Space(6f);
-
         livePathPrefabOverride = (GameObject)EditorGUILayout.ObjectField(
             "直播路径预制体",
             ResolveLivePathPrefab(),
@@ -367,9 +496,24 @@ public class AdeConsoleWindow : EditorWindow
             false);
 
         EditorGUILayout.Space(4f);
-        if (GUILayout.Button("给所有场景添加直播路径", GUILayout.Height(24)))
+        SyncLivePathSceneTextDraftsWithBuildSettings();
+        livePathSceneTextList.DoLayoutList();
+
+        EditorGUILayout.Space(4f);
+        using (new EditorGUILayout.HorizontalScope())
         {
-            AddLivePathPrefabToAllScenes();
+            GUI.enabled = livePathSceneTextDirty && !EditorApplication.isCompiling && !EditorApplication.isUpdating;
+            if (GUILayout.Button("应用文字", GUILayout.Height(24)))
+            {
+                SaveLivePathSceneTextDrafts();
+            }
+
+            GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating;
+            if (GUILayout.Button("添加/更新所有场景直播路径", GUILayout.Height(24)))
+            {
+                AddLivePathPrefabToAllScenes();
+            }
+            GUI.enabled = true;
         }
         if (GUILayout.Button("删除所有场景里的该预制体", GUILayout.Height(24)))
         {
@@ -417,11 +561,6 @@ public class AdeConsoleWindow : EditorWindow
         EditorGUILayout.Space(6f);
         using (new EditorGUILayout.HorizontalScope())
         {
-            if (GUILayout.Button("还原参数", GUILayout.Height(24)))
-            {
-                LoadRewardConfigDrafts();
-            }
-
             GUI.enabled = rewardConfigDirty && !EditorApplication.isCompiling && !EditorApplication.isUpdating;
             if (GUILayout.Button("应用参数", GUILayout.Height(24)))
             {
@@ -433,56 +572,40 @@ public class AdeConsoleWindow : EditorWindow
         EndSectionCard();
     }
 
-    void DrawNoAdsToolbar(BuildTargetGroup group, List<string> symbols)
-    {
-        bool noAdsEnabled = symbols.Contains(NoAdsSymbol);
-
-        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-        {
-            DrawSummaryRow("当前模式", noAdsEnabled ? "无广模式" : "正常广告");
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating && !noAdsEnabled;
-                if (GUILayout.Button("启用无广模式", GUILayout.Height(24)))
-                {
-                    SetNoAdsMode(group, true);
-                }
-
-                GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating && noAdsEnabled;
-                if (GUILayout.Button("恢复广告模式", GUILayout.Height(24)))
-                {
-                    SetNoAdsMode(group, false);
-                }
-                GUI.enabled = true;
-            }
-
-            EditorGUILayout.LabelField("通过 ADE_NO_ADS 宏统一控制。无广模式下激励广告会直接走成功回调，原有奖励照发。", sectionNoteStyle);
-        }
-    }
-
     void DrawRewardAdeDataInfoEditor()
     {
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
             EditorGUILayout.LabelField("内容参数", EditorStyles.miniBoldLabel);
-            string newShareId = EditorGUILayout.TextField("分享ID", rewardShareIdDraft);
-            if (newShareId != rewardShareIdDraft)
-            {
-                rewardShareIdDraft = newShareId;
-                rewardConfigDirty = true;
-            }
-
+            DrawCompactContentIdField("分享ID", rewardShareIdDraft, value => rewardShareIdDraft = value, 44f);
             subscribeTemplateList.DoLayoutList();
-            EditorGUILayout.Space(2f);
-            feedContentList.DoLayoutList();
 
-            string newFeedRepeatContentId = EditorGUILayout.TextField("复访流内容", rewardFeedRepeatContentIdDraft);
-            if (newFeedRepeatContentId != rewardFeedRepeatContentIdDraft)
+            EditorGUILayout.Space(2f);
+            DrawCompactContentIdField("复访流内容", rewardFeedRepeatContentIdDraft, value => rewardFeedRepeatContentIdDraft = value, 68f);
+            feedContentList.DoLayoutList();
+        }
+    }
+
+    void DrawCompactContentIdField(string label, string value, Action<string> applyValue, float labelWidth)
+    {
+        Rect rowRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight + 2f);
+        rowRect.y += 1f;
+        rowRect.height = EditorGUIUtility.singleLineHeight;
+
+        float previousLabelWidth = EditorGUIUtility.labelWidth;
+        try
+        {
+            EditorGUIUtility.labelWidth = labelWidth;
+            string newValue = EditorGUI.TextField(rowRect, label, value);
+            if (newValue != value)
             {
-                rewardFeedRepeatContentIdDraft = newFeedRepeatContentId;
+                applyValue?.Invoke(newValue);
                 rewardConfigDirty = true;
             }
+        }
+        finally
+        {
+            EditorGUIUtility.labelWidth = previousLabelWidth;
         }
     }
 
@@ -501,7 +624,7 @@ public class AdeConsoleWindow : EditorWindow
         EditorGUILayout.LabelField("WebGL Template", EditorStyles.boldLabel);
         EditorGUILayout.Space(4f);
 
-        int columns = Mathf.Max(1, Mathf.FloorToInt((position.width * 0.5f - 40f) / 110f));
+        int columns = Mathf.Max(1, Mathf.FloorToInt((position.width * 0.5f - 40f) / 84f));
         for (int i = 0; i < templates.Count; i += columns)
         {
             using (new EditorGUILayout.HorizontalScope())
@@ -509,10 +632,7 @@ public class AdeConsoleWindow : EditorWindow
                 for (int col = 0; col < columns && i + col < templates.Count; col++)
                 {
                     DrawUnityTemplateCard(templates[i + col], currentTemplate);
-                    if (col < columns - 1)
-                    {
-                        GUILayout.Space(10f);
-                    }
+                    GUILayout.Space(6f);
                 }
             }
 
@@ -526,32 +646,77 @@ public class AdeConsoleWindow : EditorWindow
     void DrawUnityTemplateCard(WebGLTemplateDraft template, string currentTemplate)
     {
         bool isSelected = string.Equals(template.Value, currentTemplate, StringComparison.Ordinal);
-        GUIStyle cardStyle = isSelected ? templateCardSelectedStyle : templateCardStyle;
 
-        using (new EditorGUILayout.VerticalScope(GUILayout.Width(100f)))
+        using (new EditorGUILayout.VerticalScope(GUILayout.Width(78f)))
         {
-            Rect cardRect = GUILayoutUtility.GetRect(100f, 84f, GUILayout.Width(100f), GUILayout.Height(84f));
-            GUI.Box(cardRect, GUIContent.none, cardStyle);
+            Rect cardRect = GUILayoutUtility.GetRect(78f, 92f, GUILayout.Width(78f), GUILayout.Height(92f));
+            Rect previewRect = new Rect(cardRect.x + 3f, cardRect.y, 72f, 72f);
+            Rect labelRect = new Rect(cardRect.x, previewRect.yMax + 3f, cardRect.width, 16f);
 
-            Rect previewRect = new Rect(cardRect.x + 8f, cardRect.y + 8f, cardRect.width - 16f, 54f);
-            Texture thumbnail = template.Thumbnail ?? EditorGUIUtility.IconContent("BuildSettings.Web.Small")?.image;
+            EditorGUI.DrawRect(previewRect, new Color(0.26f, 0.26f, 0.26f));
+            Texture thumbnail = template.Thumbnail;
             if (thumbnail != null)
             {
                 GUI.DrawTexture(previewRect, thumbnail, ScaleMode.ScaleToFit);
             }
             else
             {
-                EditorGUI.DrawRect(previewRect, new Color(0.18f, 0.18f, 0.18f));
+                Texture fallbackIcon = EditorGUIUtility.IconContent("BuildSettings.WebGL.Small")?.image
+                    ?? EditorGUIUtility.IconContent("BuildSettings.WebGL")?.image;
+                if (fallbackIcon != null)
+                {
+                    GUI.DrawTexture(new Rect(previewRect.x + 4f, previewRect.y + 4f, 16f, 16f), fallbackIcon, ScaleMode.ScaleToFit);
+                }
+                else
+                {
+                    DrawFallbackTemplateHtml5Icon(new Rect(previewRect.x + 5f, previewRect.y + 4f, 13f, 15f));
+                }
             }
 
+            DrawTemplatePreviewBorder(previewRect, isSelected);
             if (GUI.Button(cardRect, GUIContent.none, GUIStyle.none) && !isSelected)
             {
                 SetCurrentWebGLTemplate(template.Value);
             }
 
-            Rect labelRect = new Rect(cardRect.x + 4f, cardRect.y + 64f, cardRect.width - 8f, 16f);
+            if (isSelected)
+            {
+                EditorGUI.DrawRect(labelRect, new Color(0.12f, 0.38f, 0.9f));
+            }
             GUI.Label(labelRect, template.DisplayName, isSelected ? templateNameSelectedStyle : templateNameStyle);
         }
+    }
+
+    void DrawTemplatePreviewBorder(Rect rect, bool selected)
+    {
+        Color borderColor = selected ? new Color(0.12f, 0.38f, 0.9f) : new Color(0.12f, 0.12f, 0.12f);
+        EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, 1f), borderColor);
+        EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - 1f, rect.width, 1f), borderColor);
+        EditorGUI.DrawRect(new Rect(rect.x, rect.y, 1f, rect.height), borderColor);
+        EditorGUI.DrawRect(new Rect(rect.xMax - 1f, rect.y, 1f, rect.height), borderColor);
+    }
+
+    void DrawFallbackTemplateHtml5Icon(Rect rect)
+    {
+        Color shieldColor = EditorGUIUtility.isProSkin
+            ? new Color(0.78f, 0.78f, 0.78f)
+            : new Color(0.42f, 0.42f, 0.42f);
+        Color cutColor = new Color(0.26f, 0.26f, 0.26f);
+        Color markColor = EditorGUIUtility.isProSkin
+            ? new Color(0.36f, 0.36f, 0.36f)
+            : new Color(0.9f, 0.9f, 0.9f);
+
+        EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, rect.height - 4f), shieldColor);
+        EditorGUI.DrawRect(new Rect(rect.x + 2f, rect.yMax - 4f, rect.width - 4f, 2f), shieldColor);
+        EditorGUI.DrawRect(new Rect(rect.x + 4f, rect.yMax - 2f, rect.width - 8f, 2f), shieldColor);
+        EditorGUI.DrawRect(new Rect(rect.x, rect.y, 2f, 2f), cutColor);
+        EditorGUI.DrawRect(new Rect(rect.xMax - 2f, rect.y, 2f, 2f), cutColor);
+        GUI.Label(new Rect(rect.x + 2f, rect.y + 1f, rect.width - 4f, rect.height - 2f), "5", new GUIStyle(EditorStyles.miniBoldLabel)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            normal = { textColor = markColor },
+            fontSize = 9
+        });
     }
 
     List<WebGLTemplateDraft> GetAvailableWebGLTemplates(string currentTemplate)
@@ -564,7 +729,7 @@ public class AdeConsoleWindow : EditorWindow
 
         if (!string.IsNullOrWhiteSpace(currentTemplate) && templates.All(item => item.Value != currentTemplate))
         {
-            templates.Insert(0, new WebGLTemplateDraft(currentTemplate, GetTemplateDisplayName(currentTemplate), LoadTemplateThumbnail(currentTemplate)));
+            templates.Insert(0, new WebGLTemplateDraft(currentTemplate, GetTemplateCardDisplayName(currentTemplate), LoadTemplateThumbnail(currentTemplate)));
         }
 
         string projectTemplateRoot = System.IO.Path.Combine(Application.dataPath, "WebGLTemplates");
@@ -579,7 +744,7 @@ public class AdeConsoleWindow : EditorWindow
                     continue;
                 }
 
-                templates.Add(new WebGLTemplateDraft(templateValue, folderName, LoadTemplateThumbnail(templateValue)));
+                templates.Add(new WebGLTemplateDraft(templateValue, GetTemplateCardDisplayName(templateValue), LoadTemplateThumbnail(templateValue)));
             }
         }
 
@@ -686,6 +851,11 @@ public class AdeConsoleWindow : EditorWindow
             EditorGUILayout.PropertyField(adDataProperty.FindPropertyRelative("InterstitialID"), new GUIContent("插屏广告"), true);
             EditorGUILayout.PropertyField(adDataProperty.FindPropertyRelative("BannerID"), new GUIContent("Banner 广告"), true);
             EditorGUILayout.PropertyField(adDataProperty.FindPropertyRelative("RewardID"), new GUIContent("激励广告"), true);
+            SerializedProperty gridAdProperty = adDataProperty.FindPropertyRelative("GridAdList");
+            if (gridAdProperty != null)
+            {
+                EditorGUILayout.PropertyField(gridAdProperty, new GUIContent("格子广告"), true);
+            }
             if (EditorGUI.EndChangeCheck())
             {
                 SaveSerializedChanges(serializedObject, adsData);
@@ -700,28 +870,27 @@ public class AdeConsoleWindow : EditorWindow
             EditorGUILayout.LabelField("广告参数", EditorStyles.miniBoldLabel);
             DrawAdItemDraftFields("插屏参数", interstitialAdDraft);
             DrawAdItemDraftFields("Banner 参数", bannerAdDraft);
+            EditorGUILayout.Space(2f);
             rewardAdList.DoLayoutList();
+            EditorGUILayout.Space(2f);
+            gridAdList.DoLayoutList();
         }
     }
 
     void DrawAdItemDraftFields(string title, AdItemDraft draft)
     {
-        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-        {
-            EditorGUILayout.LabelField(title, EditorStyles.miniBoldLabel);
-            string newName = EditorGUILayout.TextField("Name", draft.Name);
-            if (newName != draft.Name)
-            {
-                draft.Name = newName;
-                rewardConfigDirty = true;
-            }
+        Rect rowRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight + 2f);
+        rowRect.y += 1f;
+        rowRect.height = EditorGUIUtility.singleLineHeight;
 
-            string newId = EditorGUILayout.TextField("ID", draft.Id);
-            if (newId != draft.Id)
-            {
-                draft.Id = newId;
-                rewardConfigDirty = true;
-            }
+        float titleWidth = Mathf.Min(78f, rowRect.width * 0.24f);
+        Rect titleRect = new Rect(rowRect.x + 2f, rowRect.y, titleWidth, rowRect.height);
+        Rect fieldRect = new Rect(titleRect.xMax + 6f, rowRect.y, rowRect.xMax - titleRect.xMax - 8f, rowRect.height);
+
+        EditorGUI.LabelField(titleRect, title, EditorStyles.miniBoldLabel);
+        if (DrawCompactAdItemFields(fieldRect, draft))
+        {
+            rewardConfigDirty = true;
         }
     }
 
@@ -747,29 +916,10 @@ public class AdeConsoleWindow : EditorWindow
             alignment = TextAnchor.MiddleLeft,
         };
 
-        summaryValueStyle = new GUIStyle(EditorStyles.label)
-        {
-            wordWrap = true,
-        };
-
         pathLabelStyle = new GUIStyle(EditorStyles.miniLabel)
         {
             wordWrap = true,
             richText = false,
-        };
-
-        templateCardStyle = new GUIStyle(EditorStyles.helpBox)
-        {
-            padding = new RectOffset(8, 8, 8, 8),
-            margin = new RectOffset(0, 0, 0, 0),
-        };
-
-        templateCardSelectedStyle = new GUIStyle(templateCardStyle);
-        templateCardSelectedStyle.normal.background = MakeSolidTexture(new Color(0.16f, 0.39f, 0.87f, 0.85f));
-
-        templateButtonStyle = new GUIStyle(EditorStyles.miniButton)
-        {
-            alignment = TextAnchor.MiddleCenter,
         };
 
         templateNameStyle = new GUIStyle(EditorStyles.miniLabel)
@@ -800,15 +950,6 @@ public class AdeConsoleWindow : EditorWindow
         EditorGUILayout.EndVertical();
     }
 
-    void DrawSummaryRow(string label, string value)
-    {
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            GUILayout.Label(label, summaryLabelStyle, GUILayout.Width(90f));
-            EditorGUILayout.LabelField(string.IsNullOrEmpty(value) ? "无" : value, summaryValueStyle);
-        }
-    }
-
     bool DrawInnerFoldout(bool expanded, string label)
     {
         Rect rect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight + 2f);
@@ -829,54 +970,72 @@ public class AdeConsoleWindow : EditorWindow
         serializedObject.UpdateIfRequiredOrScript();
     }
 
-    Texture2D MakeSolidTexture(Color color)
-    {
-        Texture2D texture = new Texture2D(1, 1);
-        texture.hideFlags = HideFlags.HideAndDontSave;
-        texture.SetPixel(0, 0, color);
-        texture.Apply();
-        return texture;
-    }
-
-    ReorderableList CreateStringListEditor(List<string> list, string header)
+    ReorderableList CreateStringListEditor(List<string> list, string header, ListSelectionState selection, Action onChanged)
     {
         var reorderableList = new ReorderableList(list, typeof(string), true, true, true, true);
-        reorderableList.drawHeaderCallback = rect => EditorGUI.LabelField(rect, header);
-        reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        reorderableList.drawHeaderCallback = rect =>
         {
             rect.y += 1f;
-            rect.height = EditorGUIUtility.singleLineHeight;
-            string updatedValue = EditorGUI.TextField(rect, list[index] ?? string.Empty);
+            EditorGUI.LabelField(rect, header, EditorStyles.miniBoldLabel);
+        };
+        reorderableList.drawElementBackgroundCallback = (rect, index, isActive, isFocused) =>
+        {
+            DrawSelectableRowBackground(rect, selection.IsSelected(index));
+        };
+        reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        {
+            if (index < 0 || index >= list.Count)
+            {
+                return;
+            }
+
+            Rect selectionRect = GetSelectionRect(rect);
+            DrawSelectionHandle(selectionRect, selection.IsSelected(index));
+            if (HandleSelectionClick(rect, selectionRect, index, selection, reorderableList))
+            {
+                return;
+            }
+
+            Rect fieldRect = GetSingleLineFieldRect(rect);
+            string updatedValue = EditorGUI.TextField(fieldRect, list[index] ?? string.Empty);
             if (updatedValue != list[index])
             {
                 list[index] = updatedValue;
-                rewardConfigDirty = true;
+                onChanged?.Invoke();
             }
         };
         reorderableList.onAddCallback = _ =>
         {
             list.Add(string.Empty);
-            rewardConfigDirty = true;
+            selection.SelectSingle(list.Count - 1);
+            onChanged?.Invoke();
         };
         reorderableList.onRemoveCallback = reorderable =>
         {
-            if (reorderable.index < 0 || reorderable.index >= list.Count)
+            if (RemoveSelectedItems(list, reorderable, selection))
             {
-                return;
+                onChanged?.Invoke();
             }
-
-            list.RemoveAt(reorderable.index);
-            rewardConfigDirty = true;
         };
-        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight + 4f;
-        reorderableList.footerHeight = 22f;
+        reorderableList.onReorderCallback = reorderable =>
+        {
+            selection.SelectSingle(reorderable.index);
+            onChanged?.Invoke();
+        };
+        reorderableList.headerHeight = EditorGUIUtility.singleLineHeight + 2f;
+        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight + 2f;
+        reorderableList.footerHeight = 18f;
         return reorderableList;
     }
 
-    ReorderableList CreateAdItemListEditor(List<AdItemDraft> list, string header)
+    ReorderableList CreateAdItemListEditor(List<AdItemDraft> list, string header, ListSelectionState selection)
     {
         var reorderableList = new ReorderableList(list, typeof(AdItemDraft), true, true, true, true);
         reorderableList.drawHeaderCallback = rect => EditorGUI.LabelField(rect, header);
+        reorderableList.drawElementBackgroundCallback = (rect, index, isActive, isFocused) =>
+        {
+            DrawSelectableRowBackground(rect, selection.IsSelected(index));
+        };
         reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
         {
             if (index < 0 || index >= list.Count)
@@ -885,41 +1044,272 @@ public class AdeConsoleWindow : EditorWindow
             }
 
             AdItemDraft item = list[index];
-            Rect nameRect = new Rect(rect.x, rect.y + 2f, rect.width, EditorGUIUtility.singleLineHeight);
-            Rect idRect = new Rect(rect.x, rect.y + EditorGUIUtility.singleLineHeight + 6f, rect.width, EditorGUIUtility.singleLineHeight);
-
-            string newName = EditorGUI.TextField(nameRect, "Name", item.Name);
-            if (newName != item.Name)
+            Rect selectionRect = GetSelectionRect(rect);
+            DrawSelectionHandle(selectionRect, selection.IsSelected(index));
+            if (HandleSelectionClick(rect, selectionRect, index, selection, reorderableList))
             {
-                item.Name = newName;
-                rewardConfigDirty = true;
+                return;
             }
 
-            string newId = EditorGUI.TextField(idRect, "ID", item.Id);
-            if (newId != item.Id)
+            Rect fieldRect = GetListContentRect(rect);
+            fieldRect.y += 3f;
+            fieldRect.height = EditorGUIUtility.singleLineHeight;
+            if (DrawCompactAdItemFields(fieldRect, item))
             {
-                item.Id = newId;
                 rewardConfigDirty = true;
             }
         };
         reorderableList.onAddCallback = _ =>
         {
             list.Add(new AdItemDraft { Name = "激励", Id = string.Empty });
+            selection.SelectSingle(list.Count - 1);
             rewardConfigDirty = true;
         };
         reorderableList.onRemoveCallback = reorderable =>
         {
-            if (reorderable.index < 0 || reorderable.index >= list.Count)
+            if (RemoveSelectedItems(list, reorderable, selection))
+            {
+                rewardConfigDirty = true;
+            }
+        };
+        reorderableList.onReorderCallback = reorderable =>
+        {
+            selection.SelectSingle(reorderable.index);
+            rewardConfigDirty = true;
+        };
+        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight + 8f;
+        reorderableList.footerHeight = 22f;
+        return reorderableList;
+    }
+
+    ReorderableList CreateGridAdListEditor(List<GridAdDraft> list, string header, ListSelectionState selection)
+    {
+        var reorderableList = new ReorderableList(list, typeof(GridAdDraft), true, true, true, true);
+        reorderableList.drawHeaderCallback = rect => EditorGUI.LabelField(rect, header);
+        reorderableList.drawElementBackgroundCallback = (rect, index, isActive, isFocused) =>
+        {
+            DrawSelectableRowBackground(rect, selection.IsSelected(index));
+        };
+        reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        {
+            if (index < 0 || index >= list.Count)
             {
                 return;
             }
 
-            list.RemoveAt(reorderable.index);
+            GridAdDraft item = list[index];
+            Rect selectionRect = GetSelectionRect(rect);
+            DrawSelectionHandle(selectionRect, selection.IsSelected(index));
+            if (HandleSelectionClick(rect, selectionRect, index, selection, reorderableList))
+            {
+                return;
+            }
+
+            Rect fieldRect = GetListContentRect(rect);
+            fieldRect.y += 3f;
+            if (DrawCompactGridAdFields(fieldRect, item))
+            {
+                rewardConfigDirty = true;
+            }
+        };
+        reorderableList.onAddCallback = _ =>
+        {
+            list.Add(new GridAdDraft
+            {
+                NameId = string.Empty,
+                Type = GridAdType.Horizontal,
+                Anchor = GridAnchorType.Bottom,
+                Position = Vector2.zero,
+                AdUnitId = string.Empty
+            });
+            selection.SelectSingle(list.Count - 1);
             rewardConfigDirty = true;
         };
-        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight * 2f + 10f;
+        reorderableList.onRemoveCallback = reorderable =>
+        {
+            if (RemoveSelectedItems(list, reorderable, selection))
+            {
+                rewardConfigDirty = true;
+            }
+        };
+        reorderableList.onReorderCallback = reorderable =>
+        {
+            selection.SelectSingle(reorderable.index);
+            rewardConfigDirty = true;
+        };
+        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight * 2f + 12f;
         reorderableList.footerHeight = 22f;
         return reorderableList;
+    }
+
+    ReorderableList CreateLivePathSceneTextListEditor()
+    {
+        var reorderableList = new ReorderableList(livePathSceneTextDrafts, typeof(LivePathSceneTextDraft), false, true, false, false);
+        reorderableList.drawHeaderCallback = rect => EditorGUI.LabelField(rect, "场景文字");
+        reorderableList.drawElementBackgroundCallback = (rect, index, isActive, isFocused) =>
+        {
+            DrawSelectableRowBackground(rect, livePathSceneTextSelection.IsSelected(index));
+        };
+        reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        {
+            if (index < 0 || index >= livePathSceneTextDrafts.Count)
+            {
+                return;
+            }
+
+            LivePathSceneTextDraft item = livePathSceneTextDrafts[index];
+            Rect selectionRect = GetSelectionRect(rect);
+            DrawSelectionHandle(selectionRect, livePathSceneTextSelection.IsSelected(index));
+            if (HandleSelectionClick(rect, selectionRect, index, livePathSceneTextSelection, reorderableList))
+            {
+                return;
+            }
+
+            Rect contentRect = GetListContentRect(rect);
+            contentRect.y += 1f;
+            contentRect.height = EditorGUIUtility.singleLineHeight;
+            float gap = 6f;
+            float sceneWidth = Mathf.Min(180f, Mathf.Max(96f, contentRect.width * 0.34f));
+            Rect sceneRect = new Rect(contentRect.x, contentRect.y, sceneWidth, contentRect.height);
+            Rect textRect = new Rect(sceneRect.xMax + gap, contentRect.y, contentRect.xMax - sceneRect.xMax - gap, contentRect.height);
+
+            EditorGUI.LabelField(sceneRect, new GUIContent(GetSceneDisplayName(item.ScenePath), item.ScenePath), EditorStyles.miniLabel);
+            string updatedText = EditorGUI.TextField(textRect, item.Text ?? string.Empty);
+            if (updatedText != item.Text)
+            {
+                item.Text = updatedText;
+                livePathSceneTextDirty = true;
+            }
+        };
+        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight + 4f;
+        reorderableList.footerHeight = 0f;
+        return reorderableList;
+    }
+
+    bool DrawCompactAdItemFields(Rect fieldRect, AdItemDraft item)
+    {
+        float gap = 6f;
+        float nameWidth = Mathf.Floor((fieldRect.width - gap) * 0.38f);
+        Rect nameRect = new Rect(fieldRect.x, fieldRect.y, nameWidth, fieldRect.height);
+        Rect idRect = new Rect(nameRect.xMax + gap, fieldRect.y, fieldRect.xMax - nameRect.xMax - gap, fieldRect.height);
+
+        bool changed = false;
+        float previousLabelWidth = EditorGUIUtility.labelWidth;
+        try
+        {
+            EditorGUIUtility.labelWidth = 40f;
+            string newName = EditorGUI.TextField(nameRect, "Name", item.Name);
+            if (newName != item.Name)
+            {
+                item.Name = newName;
+                changed = true;
+            }
+
+            EditorGUIUtility.labelWidth = 20f;
+            string newId = EditorGUI.TextField(idRect, "ID", item.Id);
+            if (newId != item.Id)
+            {
+                item.Id = newId;
+                changed = true;
+            }
+        }
+        finally
+        {
+            EditorGUIUtility.labelWidth = previousLabelWidth;
+        }
+
+        return changed;
+    }
+
+    bool DrawCompactGridAdFields(Rect fieldRect, GridAdDraft item)
+    {
+        float lineHeight = EditorGUIUtility.singleLineHeight;
+        float gap = 6f;
+        Rect firstRow = new Rect(fieldRect.x, fieldRect.y, fieldRect.width, lineHeight);
+        Rect secondRow = new Rect(fieldRect.x, firstRow.yMax + 4f, fieldRect.width, lineHeight);
+
+        float firstUsableWidth = firstRow.width - gap * 2f;
+        float nameWidth = Mathf.Floor(firstUsableWidth * 0.38f);
+        float typeWidth = Mathf.Floor(firstUsableWidth * 0.29f);
+        Rect nameRect = new Rect(firstRow.x, firstRow.y, nameWidth, lineHeight);
+        Rect typeRect = new Rect(nameRect.xMax + gap, firstRow.y, typeWidth, lineHeight);
+        Rect anchorRect = new Rect(typeRect.xMax + gap, firstRow.y, firstRow.xMax - typeRect.xMax - gap, lineHeight);
+
+        float secondUsableWidth = secondRow.width - gap;
+        float idWidth = Mathf.Floor(secondUsableWidth * 0.48f);
+        Rect idRect = new Rect(secondRow.x, secondRow.y, idWidth, lineHeight);
+        Rect positionRect = new Rect(idRect.xMax + gap, secondRow.y, secondRow.xMax - idRect.xMax - gap, lineHeight);
+
+        bool changed = false;
+        float previousLabelWidth = EditorGUIUtility.labelWidth;
+        try
+        {
+            EditorGUIUtility.labelWidth = 50f;
+            string newNameId = EditorGUI.TextField(nameRect, "名称ID", item.NameId);
+            if (newNameId != item.NameId)
+            {
+                item.NameId = newNameId;
+                changed = true;
+            }
+
+            EditorGUIUtility.labelWidth = 34f;
+            GridAdType newType = (GridAdType)EditorGUI.EnumPopup(typeRect, "类型", item.Type);
+            if (newType != item.Type)
+            {
+                item.Type = newType;
+                changed = true;
+            }
+
+            GridAnchorType newAnchor = (GridAnchorType)EditorGUI.EnumPopup(anchorRect, "锚点", item.Anchor);
+            if (newAnchor != item.Anchor)
+            {
+                item.Anchor = newAnchor;
+                changed = true;
+            }
+
+            EditorGUIUtility.labelWidth = 44f;
+            string newId = EditorGUI.TextField(idRect, "广告ID", item.AdUnitId);
+            if (newId != item.AdUnitId)
+            {
+                item.AdUnitId = newId;
+                changed = true;
+            }
+
+            Vector2 newPosition = DrawCompactVector2Field(positionRect, "位置", item.Position);
+            if (newPosition != item.Position)
+            {
+                item.Position = newPosition;
+                changed = true;
+            }
+        }
+        finally
+        {
+            EditorGUIUtility.labelWidth = previousLabelWidth;
+        }
+
+        return changed;
+    }
+
+    Vector2 DrawCompactVector2Field(Rect rect, string label, Vector2 value)
+    {
+        float labelWidth = 28f;
+        float axisWidth = 10f;
+        float gap = 3f;
+        Rect labelRect = new Rect(rect.x, rect.y, labelWidth, rect.height);
+
+        float inputStart = labelRect.xMax + gap;
+        float inputWidth = Mathf.Max(28f, (rect.xMax - inputStart - axisWidth * 2f - gap * 3f) * 0.5f);
+        Rect xLabelRect = new Rect(inputStart, rect.y, axisWidth, rect.height);
+        Rect xRect = new Rect(xLabelRect.xMax + gap, rect.y, inputWidth, rect.height);
+        Rect yLabelRect = new Rect(xRect.xMax + gap, rect.y, axisWidth, rect.height);
+        Rect yRect = new Rect(yLabelRect.xMax + gap, rect.y, Mathf.Max(28f, rect.xMax - yLabelRect.xMax - gap), rect.height);
+
+        EditorGUI.LabelField(labelRect, label, EditorStyles.miniLabel);
+        EditorGUI.LabelField(xLabelRect, "X", EditorStyles.miniLabel);
+        float newX = EditorGUI.FloatField(xRect, GUIContent.none, value.x);
+        EditorGUI.LabelField(yLabelRect, "Y", EditorStyles.miniLabel);
+        float newY = EditorGUI.FloatField(yRect, GUIContent.none, value.y);
+        return new Vector2(newX, newY);
     }
 
     void SaveReflectedAssetChanges(UnityEngine.Object asset)
@@ -946,6 +1336,7 @@ public class AdeConsoleWindow : EditorWindow
         if (assetType.Name == "AdsData")
         {
             NormalizeRewardArray(asset);
+            NormalizeGridAdList(asset);
         }
     }
 
@@ -1061,6 +1452,85 @@ public class AdeConsoleWindow : EditorWindow
         EditorUtility.SetDirty(adsData);
     }
 
+    void NormalizeGridAdList(UnityEngine.Object adsData)
+    {
+        var adDataField = adsData.GetType().GetField("AdData");
+        if (adDataField == null)
+        {
+            return;
+        }
+
+        object adDataValue = adDataField.GetValue(adsData);
+        if (adDataValue == null)
+        {
+            return;
+        }
+
+        var gridField = adDataValue.GetType().GetField("GridAdList");
+        if (gridField == null)
+        {
+            return;
+        }
+
+        if (!(gridField.GetValue(adDataValue) is IEnumerable gridItems))
+        {
+            return;
+        }
+
+        if (EditorGUIUtility.editingTextField)
+        {
+            return;
+        }
+
+        Type gridAdType = FindType("GridAdData");
+        if (gridAdType == null)
+        {
+            return;
+        }
+
+        var nameField = gridAdType.GetField("NameId");
+        var idField = gridAdType.GetField("AdUnitId");
+        if (nameField == null || idField == null)
+        {
+            return;
+        }
+
+        IList validItems = Activator.CreateInstance(typeof(List<>).MakeGenericType(gridAdType)) as IList;
+        if (validItems == null)
+        {
+            return;
+        }
+
+        int sourceCount = 0;
+        foreach (object item in gridItems)
+        {
+            sourceCount++;
+            if (item == null)
+            {
+                continue;
+            }
+
+            string nameValue = (nameField.GetValue(item) as string)?.Trim();
+            string idValue = (idField.GetValue(item) as string)?.Trim();
+            if (string.IsNullOrWhiteSpace(nameValue) && string.IsNullOrWhiteSpace(idValue))
+            {
+                continue;
+            }
+
+            nameField.SetValue(item, nameValue ?? string.Empty);
+            idField.SetValue(item, idValue ?? string.Empty);
+            validItems.Add(item);
+        }
+
+        if (validItems.Count == sourceCount)
+        {
+            return;
+        }
+
+        gridField.SetValue(adDataValue, validItems);
+        EditorUtility.SetDirty(adsData);
+    }
+
     string GetStringFieldValue(object target, string fieldName)
     {
         return GetFieldValue(target, fieldName) as string ?? string.Empty;
@@ -1133,6 +1603,33 @@ public class AdeConsoleWindow : EditorWindow
         return items;
     }
 
+    List<object> GetGridAdItems(object adDataValue)
+    {
+        List<object> items = new List<object>();
+        if (adDataValue == null)
+        {
+            return items;
+        }
+
+        var gridField = adDataValue.GetType().GetField("GridAdList");
+        if (gridField == null)
+        {
+            return items;
+        }
+
+        if (!(gridField.GetValue(adDataValue) is IEnumerable gridItems))
+        {
+            return items;
+        }
+
+        foreach (object item in gridItems)
+        {
+            items.Add(item);
+        }
+
+        return items;
+    }
+
     void SetRewardItems(object adDataValue, List<object> rewardItems)
     {
         if (adDataValue == null)
@@ -1188,7 +1685,38 @@ public class AdeConsoleWindow : EditorWindow
 
         editableCustomSymbols.Clear();
         editableCustomSymbols.AddRange(newSymbols.Distinct().OrderBy(item => item));
-        customSymbolsDirty = true;
+        customSymbolSelection.Clear();
+        UpdateCustomSymbolsDirty();
+    }
+
+    void SetNoAdsModeInEditor(bool enabled)
+    {
+        SetManagedSymbol(NoAdsSymbol, enabled);
+    }
+
+    void SetManagedSymbol(string symbol, bool enabled)
+    {
+        editableCustomSymbols.RemoveAll(item => item == symbol);
+        if (enabled)
+        {
+            editableCustomSymbols.Add(symbol);
+        }
+
+        List<string> normalizedSymbols = editableCustomSymbols
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct()
+            .OrderBy(item => item)
+            .ToList();
+
+        editableCustomSymbols.Clear();
+        editableCustomSymbols.AddRange(normalizedSymbols);
+        customSymbolSelection.Clear();
+        UpdateCustomSymbolsDirty();
+    }
+
+    void UpdateCustomSymbolsDirty()
+    {
+        customSymbolsDirty = BuildDefineString(editableCustomSymbols) != cachedDefineString;
     }
 
     List<string> GetSymbols(BuildTargetGroup group)
@@ -1211,13 +1739,13 @@ public class AdeConsoleWindow : EditorWindow
             }
         }
 
-        string customSymbol = symbols.FirstOrDefault(item => item.StartsWith("Ade_"));
+        string customSymbol = symbols.FirstOrDefault(IsPlatformLikeSymbol);
         return string.IsNullOrEmpty(customSymbol) ? "未识别" : customSymbol;
     }
 
     bool IsCurrentPreset(List<string> symbols, string symbol)
     {
-        string currentSymbol = symbols.FirstOrDefault(item => item.StartsWith("Ade_"));
+        string currentSymbol = symbols.FirstOrDefault(IsPlatformLikeSymbol);
 
         if (string.IsNullOrEmpty(symbol))
         {
@@ -1225,6 +1753,13 @@ public class AdeConsoleWindow : EditorWindow
         }
 
         return currentSymbol == symbol;
+    }
+
+    bool IsPlatformLikeSymbol(string symbol)
+    {
+        return !string.IsNullOrEmpty(symbol)
+            && symbol.StartsWith("Ade_", StringComparison.Ordinal)
+            && symbol != DebugSymbol;
     }
 
     void SyncCustomSymbols(BuildTargetGroup group, List<string> symbols)
@@ -1248,6 +1783,7 @@ public class AdeConsoleWindow : EditorWindow
         cachedDefineString = BuildDefineString(symbols);
         editableCustomSymbols.Clear();
         editableCustomSymbols.AddRange(symbols.OrderBy(item => item));
+        customSymbolSelection.Clear();
         customSymbolsDirty = false;
     }
 
@@ -1263,26 +1799,6 @@ public class AdeConsoleWindow : EditorWindow
         string defineString = BuildDefineString(result);
         PlayerSettings.SetScriptingDefineSymbolsForGroup(group, defineString);
         LoadCustomSymbols(group, result);
-        Debug.Log($"AdeConsole: 宏定义已保存，当前宏为 {defineString}");
-        Repaint();
-    }
-
-    void SetNoAdsMode(BuildTargetGroup group, bool enabled)
-    {
-        List<string> symbols = GetSymbols(group);
-        symbols.RemoveAll(item => item == NoAdsSymbol);
-
-        if (enabled)
-        {
-            symbols.Add(NoAdsSymbol);
-        }
-
-        string defineString = BuildDefineString(symbols);
-        PlayerSettings.SetScriptingDefineSymbolsForGroup(group, defineString);
-        LoadCustomSymbols(group, symbols);
-        Debug.Log(enabled
-            ? "AdeConsole: 已启用无广模式"
-            : "AdeConsole: 已恢复广告模式");
         Repaint();
     }
 
@@ -1320,7 +1836,6 @@ public class AdeConsoleWindow : EditorWindow
 
         System.IO.File.WriteAllText(ProjectSettingsAssetPath, updated);
         AssetDatabase.Refresh();
-        Debug.Log($"AdeConsole: WebGL Template 已切换为 {GetTemplateDisplayName(templateValue)}");
     }
 
     string GetTemplateDisplayName(string templateValue)
@@ -1329,6 +1844,20 @@ public class AdeConsoleWindow : EditorWindow
         return separatorIndex >= 0 && separatorIndex < templateValue.Length - 1
             ? templateValue.Substring(separatorIndex + 1)
             : templateValue;
+    }
+
+    string GetTemplateCardDisplayName(string templateValue)
+    {
+        string templateName = GetTemplateDisplayName(templateValue);
+        switch (templateName)
+        {
+            case "Ade_Debug":
+                return "Debug横屏";
+            case "Ade_Debug_Portrait":
+                return "Debug竖屏";
+            default:
+                return templateName;
+        }
     }
 
     Texture2D LoadTemplateThumbnail(string templateValue)
@@ -1351,7 +1880,7 @@ public class AdeConsoleWindow : EditorWindow
         if (templateValue.StartsWith("APPLICATION:", StringComparison.Ordinal))
         {
             string templateName = GetTemplateDisplayName(templateValue);
-            return System.IO.Path.Combine(BuiltinWebGLTemplateRoot, templateName, "thumbnail.png");
+            return System.IO.Path.Combine(GetBuiltinWebGLTemplateRoot(), templateName, "thumbnail.png");
         }
 
         if (templateValue.StartsWith("PROJECT:", StringComparison.Ordinal))
@@ -1361,6 +1890,168 @@ public class AdeConsoleWindow : EditorWindow
         }
 
         return null;
+    }
+
+    string GetBuiltinWebGLTemplateRoot()
+    {
+        string contentsPath = EditorApplication.applicationContentsPath;
+        string applicationDirectory = System.IO.Path.GetDirectoryName(EditorApplication.applicationPath);
+        string[] candidates =
+        {
+            System.IO.Path.Combine(contentsPath, "PlaybackEngines", "WebGLSupport", "BuildTools", "WebGLTemplates"),
+            System.IO.Path.Combine(applicationDirectory ?? string.Empty, "Data", "PlaybackEngines", "WebGLSupport", "BuildTools", "WebGLTemplates"),
+        };
+
+        foreach (string candidate in candidates)
+        {
+            if (System.IO.Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return candidates[0];
+    }
+
+    string[] GetBuildScenePaths()
+    {
+        return EditorBuildSettings.scenes
+            .Select(item => item.path)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct()
+            .ToArray();
+    }
+
+    void LoadLivePathSceneTextDrafts()
+    {
+        livePathSceneTextDrafts ??= new List<LivePathSceneTextDraft>();
+        livePathSceneTextDrafts.Clear();
+
+        string json = EditorPrefs.GetString(LivePathSceneTextEditorPrefsKey, string.Empty);
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                LivePathSceneTextStore store = JsonUtility.FromJson<LivePathSceneTextStore>(json);
+                if (store?.Items != null)
+                {
+                    livePathSceneTextDrafts.AddRange(store.Items.Where(item => item != null));
+                }
+            }
+            catch (ArgumentException)
+            {
+                EditorPrefs.DeleteKey(LivePathSceneTextEditorPrefsKey);
+            }
+        }
+
+        SyncLivePathSceneTextDraftsWithBuildSettings();
+        livePathSceneTextDirty = false;
+    }
+
+    void SaveLivePathSceneTextDrafts()
+    {
+        LivePathSceneTextStore store = new LivePathSceneTextStore
+        {
+            Items = livePathSceneTextDrafts
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.ScenePath))
+                .Select(item => new LivePathSceneTextDraft
+                {
+                    ScenePath = item.ScenePath,
+                    Text = item.Text ?? string.Empty
+                })
+                .ToList()
+        };
+
+        EditorPrefs.SetString(LivePathSceneTextEditorPrefsKey, JsonUtility.ToJson(store));
+        livePathSceneTextDirty = false;
+    }
+
+    void SyncLivePathSceneTextDraftsWithBuildSettings()
+    {
+        livePathSceneTextDrafts ??= new List<LivePathSceneTextDraft>();
+
+        string[] scenePaths = GetBuildScenePaths();
+        Dictionary<string, LivePathSceneTextDraft> existingDrafts = livePathSceneTextDrafts
+            .Where(item => item != null && !string.IsNullOrWhiteSpace(item.ScenePath))
+            .GroupBy(item => item.ScenePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        bool changed = livePathSceneTextDrafts.Count != scenePaths.Length;
+        List<LivePathSceneTextDraft> syncedDrafts = new List<LivePathSceneTextDraft>(scenePaths.Length);
+        string defaultText = GetLivePathDefaultText();
+
+        foreach (string scenePath in scenePaths)
+        {
+            if (existingDrafts.TryGetValue(scenePath, out LivePathSceneTextDraft draft))
+            {
+                syncedDrafts.Add(draft);
+            }
+            else
+            {
+                syncedDrafts.Add(new LivePathSceneTextDraft
+                {
+                    ScenePath = scenePath,
+                    Text = defaultText
+                });
+                changed = true;
+            }
+        }
+
+        if (!changed)
+        {
+            for (int i = 0; i < syncedDrafts.Count; i++)
+            {
+                if (!string.Equals(livePathSceneTextDrafts[i].ScenePath, syncedDrafts[i].ScenePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        livePathSceneTextDrafts.Clear();
+        livePathSceneTextDrafts.AddRange(syncedDrafts);
+        livePathSceneTextSelection.Clear();
+        if (livePathSceneTextList != null)
+        {
+            livePathSceneTextList.index = livePathSceneTextDrafts.Count > 0 ? 0 : -1;
+        }
+        SaveLivePathSceneTextDrafts();
+    }
+
+    string GetLivePathSceneText(string scenePath)
+    {
+        LivePathSceneTextDraft draft = livePathSceneTextDrafts
+            .FirstOrDefault(item => item != null && string.Equals(item.ScenePath, scenePath, StringComparison.OrdinalIgnoreCase));
+        return draft != null ? draft.Text ?? string.Empty : GetLivePathDefaultText();
+    }
+
+    string GetLivePathDefaultText()
+    {
+        GameObject prefab = ResolveLivePathPrefab();
+        if (prefab == null)
+        {
+            return "首页=>开始游戏";
+        }
+
+        Text text = prefab.GetComponentInChildren<Text>(true);
+        return text != null ? text.text : "首页=>开始游戏";
+    }
+
+    string GetSceneDisplayName(string scenePath)
+    {
+        if (string.IsNullOrWhiteSpace(scenePath))
+        {
+            return "未命名场景";
+        }
+
+        string fileName = System.IO.Path.GetFileNameWithoutExtension(scenePath);
+        return string.IsNullOrWhiteSpace(fileName) ? scenePath : fileName;
     }
 
     void AddLivePathPrefabToAllScenes()
@@ -1373,11 +2064,12 @@ public class AdeConsoleWindow : EditorWindow
         }
 
         string prefabPath = AssetDatabase.GetAssetPath(prefab);
-        string[] scenePaths = EditorBuildSettings.scenes
-            .Select(item => item.path)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct()
-            .ToArray();
+        SyncLivePathSceneTextDraftsWithBuildSettings();
+        if (livePathSceneTextDirty)
+        {
+            SaveLivePathSceneTextDrafts();
+        }
+        string[] scenePaths = GetBuildScenePaths();
 
         if (scenePaths.Length == 0)
         {
@@ -1387,7 +2079,7 @@ public class AdeConsoleWindow : EditorWindow
 
         bool confirmed = EditorUtility.DisplayDialog(
             "批量添加直播路径",
-            $"将检查并处理 Build Settings 中的 {scenePaths.Length} 个场景。\n已存在该 Prefab 的场景会自动跳过。",
+            $"将检查并处理 Build Settings 中的 {scenePaths.Length} 个场景。\n已存在该 Prefab 的场景会更新场景文字。",
             "开始",
             "取消");
 
@@ -1398,6 +2090,7 @@ public class AdeConsoleWindow : EditorWindow
 
         SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
         int addedCount = 0;
+        int updatedCount = 0;
         int skippedCount = 0;
 
         try
@@ -1405,13 +2098,28 @@ public class AdeConsoleWindow : EditorWindow
             foreach (string scenePath in scenePaths)
             {
                 Scene scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
-                if (SceneContainsPrefab(scene, prefabPath))
+                string sceneText = GetLivePathSceneText(scenePath);
+                List<GameObject> existingInstances = FindPrefabInstancesInScene(scene, prefabPath);
+                if (existingInstances.Count > 0)
                 {
-                    skippedCount++;
+                    if (ApplyLivePathTextToInstances(existingInstances, sceneText))
+                    {
+                        EditorSceneManager.MarkSceneDirty(scene);
+                        EditorSceneManager.SaveScene(scene);
+                        updatedCount++;
+                    }
+                    else
+                    {
+                        skippedCount++;
+                    }
                     continue;
                 }
 
-                PrefabUtility.InstantiatePrefab(prefab, scene);
+                GameObject instance = PrefabUtility.InstantiatePrefab(prefab, scene) as GameObject;
+                if (instance != null)
+                {
+                    ApplyLivePathText(instance, sceneText);
+                }
                 EditorSceneManager.MarkSceneDirty(scene);
                 EditorSceneManager.SaveScene(scene);
                 addedCount++;
@@ -1427,7 +2135,7 @@ public class AdeConsoleWindow : EditorWindow
 
         EditorUtility.DisplayDialog(
             "处理完成",
-            $"已新增 {addedCount} 个场景，跳过 {skippedCount} 个已存在场景。",
+            $"已新增 {addedCount} 个场景，更新 {updatedCount} 个已有场景，跳过 {skippedCount} 个无需更新场景。",
             "确定");
     }
 
@@ -1441,11 +2149,7 @@ public class AdeConsoleWindow : EditorWindow
         }
 
         string prefabPath = AssetDatabase.GetAssetPath(prefab);
-        string[] scenePaths = EditorBuildSettings.scenes
-            .Select(item => item.path)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct()
-            .ToArray();
+        string[] scenePaths = GetBuildScenePaths();
 
         if (scenePaths.Length == 0)
         {
@@ -1504,9 +2208,100 @@ public class AdeConsoleWindow : EditorWindow
             "确定");
     }
 
-    bool SceneContainsPrefab(Scene scene, string prefabPath)
+    bool ApplyLivePathTextToInstances(List<GameObject> instances, string sceneText)
     {
-        return FindPrefabInstancesInScene(scene, prefabPath).Count > 0;
+        bool changed = false;
+        foreach (GameObject instance in instances)
+        {
+            if (instance == null)
+            {
+                continue;
+            }
+
+            changed |= ApplyLivePathText(instance, sceneText);
+        }
+
+        return changed;
+    }
+
+    bool ApplyLivePathText(GameObject instance, string sceneText)
+    {
+        if (instance == null)
+        {
+            return false;
+        }
+
+        string normalizedText = sceneText ?? string.Empty;
+        bool changed = false;
+        Text[] texts = instance.GetComponentsInChildren<Text>(true);
+        foreach (Text text in texts)
+        {
+            if (text == null)
+            {
+                continue;
+            }
+
+            if (text.text != normalizedText)
+            {
+                Undo.RecordObject(text, "设置直播路径文字");
+                text.text = normalizedText;
+                PrefabUtility.RecordPrefabInstancePropertyModifications(text);
+                EditorUtility.SetDirty(text);
+                changed = true;
+            }
+
+            string textObjectName = string.IsNullOrWhiteSpace(normalizedText) ? "直播路径文字" : normalizedText;
+            if (text.gameObject.name != textObjectName)
+            {
+                Undo.RecordObject(text.gameObject, "设置直播路径文字名称");
+                text.gameObject.name = textObjectName;
+                EditorUtility.SetDirty(text.gameObject);
+                changed = true;
+            }
+        }
+
+        changed |= ApplyLivePathTextByReflection(instance, normalizedText);
+        return changed;
+    }
+
+    bool ApplyLivePathTextByReflection(GameObject instance, string sceneText)
+    {
+        bool changed = false;
+        Component[] components = instance.GetComponentsInChildren<Component>(true);
+        foreach (Component component in components)
+        {
+            if (component == null)
+            {
+                continue;
+            }
+
+            Type type = component.GetType();
+            string typeName = type.FullName;
+            if (typeName != "TMPro.TextMeshProUGUI" && typeName != "TMPro.TextMeshPro")
+            {
+                continue;
+            }
+
+            var textProperty = type.GetProperty("text");
+            if (textProperty == null || !textProperty.CanRead || !textProperty.CanWrite)
+            {
+                continue;
+            }
+
+            string currentText = textProperty.GetValue(component) as string ?? string.Empty;
+            if (currentText == sceneText)
+            {
+                continue;
+            }
+
+            Undo.RecordObject(component, "设置直播路径文字");
+            textProperty.SetValue(component, sceneText);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(component);
+            EditorUtility.SetDirty(component);
+            changed = true;
+        }
+
+        return changed;
     }
 
     List<GameObject> FindPrefabInstancesInScene(Scene scene, string prefabPath)
@@ -1572,9 +2367,21 @@ public class AdeConsoleWindow : EditorWindow
                 LoadAdItemDraft(draft, rewardItem);
                 rewardAdDrafts.Add(draft);
             }
+
+            gridAdDrafts.Clear();
+            foreach (object gridItem in GetGridAdItems(adDataValue))
+            {
+                GridAdDraft draft = new GridAdDraft();
+                LoadGridAdDraft(draft, gridItem);
+                gridAdDrafts.Add(draft);
+            }
         }
 
         rewardConfigDirty = false;
+        subscribeTemplateSelection.Clear();
+        feedContentSelection.Clear();
+        rewardAdSelection.Clear();
+        gridAdSelection.Clear();
     }
 
     void SaveRewardConfigDrafts()
@@ -1582,6 +2389,7 @@ public class AdeConsoleWindow : EditorWindow
         UnityEngine.Object adeDataInfo = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdeDataInfoPath);
         if (adeDataInfo != null)
         {
+            Undo.RecordObject(adeDataInfo, "应用 AdeDataInfo 参数");
             SetFieldValue(adeDataInfo, "ShareId", rewardShareIdDraft ?? string.Empty);
             SetFieldValue(adeDataInfo, "FeedRepeatContentID", rewardFeedRepeatContentIdDraft ?? string.Empty);
             SetFieldValue(adeDataInfo, "SubscribeTmplIds", new List<string>(subscribeTemplateDrafts));
@@ -1592,16 +2400,17 @@ public class AdeConsoleWindow : EditorWindow
         UnityEngine.Object adsData = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdsDataPath);
         if (adsData != null)
         {
+            Undo.RecordObject(adsData, "应用 AdsData 参数");
             EnsureAdsDataStructure(adsData);
             object adDataValue = GetFieldValue(adsData, "AdData");
             SaveAdItemDraft(interstitialAdDraft, GetFieldValue(adDataValue, "InterstitialID"));
             SaveAdItemDraft(bannerAdDraft, GetFieldValue(adDataValue, "BannerID"));
             SetRewardItemsFromDrafts(adDataValue, rewardAdDrafts);
+            SetGridAdItemsFromDrafts(adDataValue, gridAdDrafts);
             SaveReflectedAssetChanges(adsData);
         }
 
         rewardConfigDirty = false;
-        Debug.Log("AdeConsole: 激励参数已保存");
     }
 
     void LoadAdItemDraft(AdItemDraft draft, object item)
@@ -1619,6 +2428,37 @@ public class AdeConsoleWindow : EditorWindow
 
         SetFieldValue(item, "name", draft.Name ?? string.Empty);
         SetFieldValue(item, "ID", draft.Id ?? string.Empty);
+    }
+
+    void LoadGridAdDraft(GridAdDraft draft, object item)
+    {
+        if (draft == null)
+        {
+            return;
+        }
+
+        if (item == null)
+        {
+            draft.NameId = string.Empty;
+            draft.Type = GridAdType.Horizontal;
+            draft.Anchor = GridAnchorType.Bottom;
+            draft.Position = Vector2.zero;
+            draft.AdUnitId = string.Empty;
+            return;
+        }
+
+        draft.NameId = GetStringFieldValue(item, "NameId");
+
+        object typeValue = GetFieldValue(item, "Type");
+        draft.Type = typeValue is GridAdType type ? type : GridAdType.Horizontal;
+
+        draft.AdUnitId = GetStringFieldValue(item, "AdUnitId");
+
+        object anchorValue = GetFieldValue(item, "Anchor");
+        draft.Anchor = anchorValue is GridAnchorType anchor ? anchor : GridAnchorType.Bottom;
+
+        object positionValue = GetFieldValue(item, "Position");
+        draft.Position = positionValue is Vector2 position ? position : Vector2.zero;
     }
 
     void SetRewardItemsFromDrafts(object adDataValue, List<AdItemDraft> drafts)
@@ -1647,10 +2487,50 @@ public class AdeConsoleWindow : EditorWindow
         rewardField?.SetValue(adDataValue, rewardArray);
     }
 
+    void SetGridAdItemsFromDrafts(object adDataValue, List<GridAdDraft> drafts)
+    {
+        if (adDataValue == null)
+        {
+            return;
+        }
+
+        var gridField = adDataValue.GetType().GetField("GridAdList");
+        if (gridField == null)
+        {
+            return;
+        }
+
+        Type gridAdType = FindType("GridAdData");
+        if (gridAdType == null)
+        {
+            return;
+        }
+
+        Type listType = typeof(List<>).MakeGenericType(gridAdType);
+        IList gridList = Activator.CreateInstance(listType) as IList;
+        if (gridList == null)
+        {
+            return;
+        }
+
+        foreach (GridAdDraft draft in drafts)
+        {
+            object gridItem = Activator.CreateInstance(gridAdType);
+            SetFieldValue(gridItem, "NameId", draft.NameId ?? string.Empty);
+            SetFieldValue(gridItem, "Type", draft.Type);
+            SetFieldValue(gridItem, "AdUnitId", draft.AdUnitId ?? string.Empty);
+            SetFieldValue(gridItem, "Anchor", draft.Anchor);
+            SetFieldValue(gridItem, "Position", draft.Position);
+            gridList.Add(gridItem);
+        }
+
+        gridField.SetValue(adDataValue, gridList);
+    }
+
     void LoadFeedLaunchMode()
     {
-        cachedFeedLaunchMode = (FeedLaunchMode)PlayerPrefs.GetInt(
-            FeedLaunchModePlayerPrefsKey,
+        cachedFeedLaunchMode = (FeedLaunchMode)EditorPrefs.GetInt(
+            FeedLaunchModeEditorPrefsKey,
             (int)FeedLaunchMode.None);
         selectedFeedLaunchMode = cachedFeedLaunchMode;
         launchModeDirty = false;
@@ -1658,8 +2538,8 @@ public class AdeConsoleWindow : EditorWindow
 
     void SyncFeedLaunchMode()
     {
-        FeedLaunchMode currentMode = (FeedLaunchMode)PlayerPrefs.GetInt(
-            FeedLaunchModePlayerPrefsKey,
+        FeedLaunchMode currentMode = (FeedLaunchMode)EditorPrefs.GetInt(
+            FeedLaunchModeEditorPrefsKey,
             (int)FeedLaunchMode.None);
 
         if (!launchModeDirty && currentMode != cachedFeedLaunchMode)
@@ -1687,11 +2567,9 @@ public class AdeConsoleWindow : EditorWindow
             return;
         }
 
-        PlayerPrefs.SetInt(FeedLaunchModePlayerPrefsKey, (int)selectedFeedLaunchMode);
-        PlayerPrefs.Save();
+        EditorPrefs.SetInt(FeedLaunchModeEditorPrefsKey, (int)selectedFeedLaunchMode);
         cachedFeedLaunchMode = selectedFeedLaunchMode;
         launchModeDirty = false;
-        Debug.Log($"AdeConsole: 推荐流启动模拟已切换为 {GetFeedLaunchModeLabel(selectedFeedLaunchMode)}");
     }
 
     int GetCurrentPresetIndex(List<string> symbols)
@@ -2023,6 +2901,7 @@ public class AdeConsoleWindow : EditorWindow
 
         Type adsPlatformDataType = FindType("AdsPlatformData");
         Type adItemDataType = FindType("AdItemData");
+        Type gridAdDataType = FindType("GridAdData");
         if (adsPlatformDataType == null || adItemDataType == null)
         {
             return;
@@ -2043,6 +2922,14 @@ public class AdeConsoleWindow : EditorWindow
         if (rewardField != null && rewardField.GetValue(adDataValue) == null)
         {
             rewardField.SetValue(adDataValue, Array.CreateInstance(adItemDataType, 0));
+            EditorUtility.SetDirty(adsData);
+        }
+
+        var gridField = adsPlatformDataType.GetField("GridAdList");
+        if (gridField != null && gridField.GetValue(adDataValue) == null && gridAdDataType != null)
+        {
+            Type listType = typeof(List<>).MakeGenericType(gridAdDataType);
+            gridField.SetValue(adDataValue, Activator.CreateInstance(listType));
             EditorUtility.SetDirty(adsData);
         }
     }
@@ -2079,6 +2966,101 @@ public class AdeConsoleWindow : EditorWindow
         public string Id = string.Empty;
     }
 
+    class GridAdDraft
+    {
+        public string NameId = string.Empty;
+        public GridAdType Type = GridAdType.Horizontal;
+        public string AdUnitId = string.Empty;
+        public GridAnchorType Anchor = GridAnchorType.Bottom;
+        public Vector2 Position = Vector2.zero;
+    }
+
+    [Serializable]
+    class LivePathSceneTextDraft
+    {
+        public string ScenePath = string.Empty;
+        public string Text = string.Empty;
+    }
+
+    [Serializable]
+    class LivePathSceneTextStore
+    {
+        public List<LivePathSceneTextDraft> Items = new();
+    }
+
+    class ListSelectionState
+    {
+        readonly HashSet<int> selectedIndices = new();
+        int anchorIndex = -1;
+
+        public bool IsSelected(int index)
+        {
+            return selectedIndices.Contains(index);
+        }
+
+        public void Clear()
+        {
+            selectedIndices.Clear();
+            anchorIndex = -1;
+        }
+
+        public void SelectSingle(int index)
+        {
+            selectedIndices.Clear();
+            if (index >= 0)
+            {
+                selectedIndices.Add(index);
+                anchorIndex = index;
+            }
+            else
+            {
+                anchorIndex = -1;
+            }
+        }
+
+        public void Toggle(int index)
+        {
+            if (index < 0)
+            {
+                return;
+            }
+
+            if (!selectedIndices.Add(index))
+            {
+                selectedIndices.Remove(index);
+            }
+
+            anchorIndex = index;
+        }
+
+        public void SelectRange(int index, int itemCount)
+        {
+            if (index < 0 || itemCount <= 0)
+            {
+                return;
+            }
+
+            if (anchorIndex < 0 || anchorIndex >= itemCount)
+            {
+                SelectSingle(index);
+                return;
+            }
+
+            selectedIndices.Clear();
+            int start = Mathf.Clamp(Mathf.Min(anchorIndex, index), 0, itemCount - 1);
+            int end = Mathf.Clamp(Mathf.Max(anchorIndex, index), 0, itemCount - 1);
+            for (int i = start; i <= end; i++)
+            {
+                selectedIndices.Add(i);
+            }
+        }
+
+        public List<int> GetSelectedIndicesDescending()
+        {
+            return selectedIndices.OrderByDescending(i => i).ToList();
+        }
+    }
+
     class WebGLTemplateDraft
     {
         public string Value;
@@ -2091,5 +3073,126 @@ public class AdeConsoleWindow : EditorWindow
             DisplayName = displayName;
             Thumbnail = thumbnail;
         }
+    }
+
+    Rect GetSelectionRect(Rect rect)
+    {
+        return new Rect(rect.x, rect.y, ListSelectHandleWidth, rect.height);
+    }
+
+    Rect GetSingleLineFieldRect(Rect rect)
+    {
+        return new Rect(rect.x + ListSelectContentOffset, rect.y + 1f, rect.width - ListSelectContentOffset - 2f, EditorGUIUtility.singleLineHeight);
+    }
+
+    Rect GetListContentRect(Rect rect)
+    {
+        return new Rect(rect.x + ListSelectContentOffset, rect.y, rect.width - ListSelectContentOffset - 2f, rect.height);
+    }
+
+    void DrawSelectableRowBackground(Rect rect, bool selected)
+    {
+        if (!selected)
+        {
+            return;
+        }
+
+        EditorGUI.DrawRect(rect, new Color(0.24f, 0.48f, 0.85f, 0.2f));
+    }
+
+    void DrawSelectionHandle(Rect selectionRect, bool selected)
+    {
+        Color handleColor = selected
+            ? new Color(0.28f, 0.55f, 0.95f, 0.9f)
+            : new Color(0.5f, 0.5f, 0.5f, 0.35f);
+        Rect handleRect = new Rect(selectionRect.x + 4f, selectionRect.y + 3f, 3f, Mathf.Max(4f, selectionRect.height - 6f));
+        EditorGUI.DrawRect(handleRect, handleColor);
+    }
+
+    bool HandleSelectionClick(Rect rowRect, Rect selectionRect, int index, ListSelectionState selection, ReorderableList reorderableList)
+    {
+        Event currentEvent = Event.current;
+        if (currentEvent.type != EventType.MouseDown || currentEvent.button != 0)
+        {
+            return false;
+        }
+
+        bool ctrl = currentEvent.control || currentEvent.command;
+        bool shift = currentEvent.shift;
+        bool clickedSelectionHandle = selectionRect.Contains(currentEvent.mousePosition);
+        bool clickedModifiedRow = (ctrl || shift) && rowRect.Contains(currentEvent.mousePosition);
+        if (!clickedSelectionHandle && !clickedModifiedRow)
+        {
+            return false;
+        }
+
+        if (shift)
+        {
+            selection.SelectRange(index, reorderableList.list != null ? reorderableList.list.Count : 0);
+        }
+        else if (ctrl)
+        {
+            selection.Toggle(index);
+        }
+        else
+        {
+            selection.SelectSingle(index);
+        }
+
+        reorderableList.index = index;
+        currentEvent.Use();
+        Repaint();
+        return true;
+    }
+
+    bool RemoveSelectedItems<T>(List<T> list, ReorderableList reorderableList, ListSelectionState selection)
+    {
+        if (list == null || list.Count == 0)
+        {
+            return false;
+        }
+
+        List<int> selectedIndices = selection.GetSelectedIndicesDescending();
+        if (selectedIndices.Count == 0)
+        {
+            if (reorderableList.index < 0 || reorderableList.index >= list.Count)
+            {
+                return false;
+            }
+
+            selectedIndices.Add(reorderableList.index);
+        }
+
+        int focusIndex = selectedIndices.Min();
+        bool removedAny = false;
+        foreach (int index in selectedIndices)
+        {
+            if (index < 0 || index >= list.Count)
+            {
+                continue;
+            }
+
+            list.RemoveAt(index);
+            removedAny = true;
+        }
+
+        if (!removedAny)
+        {
+            return false;
+        }
+
+        selection.Clear();
+        if (list.Count > 0)
+        {
+            int newIndex = Mathf.Clamp(focusIndex, 0, list.Count - 1);
+            reorderableList.index = newIndex;
+            selection.SelectSingle(newIndex);
+        }
+        else
+        {
+            reorderableList.index = -1;
+        }
+
+        return true;
     }
 }

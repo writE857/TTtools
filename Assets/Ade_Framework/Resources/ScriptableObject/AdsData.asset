@@ -18,8 +18,9 @@ MonoBehaviour:
       name: "\u63D2\u5C4F"
       ID: 
     BannerID:
-      name: 
+      name: Ban
       ID: 
     RewardID:
     - name: "\u6FC0\u52B1"
       ID: 
+    GridAdList: []

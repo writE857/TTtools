@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: a091b8305f710e247a4a348c0a873707
+guid: d8342e62a6e31f343b4ab481b32d0d9c
 TrueTypeFontImporter:
   externalObjects: {}
   serializedVersion: 4
@@ -9,7 +9,7 @@ TrueTypeFontImporter:
   characterPadding: 1
   includeFontData: 1
   fontNames:
-  - 221-SSBiaoTiTi
+  - SimHei
   fallbackFontReferences: []
   customCharacters: 
   fontRenderingMode: 0

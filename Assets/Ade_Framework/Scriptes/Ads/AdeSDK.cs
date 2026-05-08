@@ -6,6 +6,10 @@ using System;
 using UnityEngine.Networking;
 using UnityEngine.SocialPlatforms.Impl;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 
 
 
@@ -36,8 +40,8 @@ namespace Ade_Framework
         public void Init(Action action)
         {
             GameShowAction = action;
-#if UNITY_EDITOR
-            LogManager.Log("UNITY_EDITOR");
+#if UNITY_EDITOR || Ade_Debug
+            LogManager.Log("UNITY_EDITOR/Ade_Debug");
             InitBack();
 #elif Ade_TT
             TT.InitSDK((i, data) =>
@@ -96,7 +100,10 @@ namespace Ade_Framework
         /// </summary>
         public void PlatformSetting()
         {
-#if UNITY_EDITOR
+#if UNITY_EDITOR || Ade_Debug
+#if Ade_TT
+            isSidebar = true;
+#endif
             return;
 #elif Ade_TT
             m_TTGameRecorder = TT.GetGameRecorder();
@@ -232,7 +239,11 @@ namespace Ade_Framework
         }   
         public bool isIos 
         {
+#if Ade_Debug
+            get => false;
+#else
             get => TT.GetSystemInfo().platform == "ios";
+#endif
         }
 
 
@@ -289,7 +300,7 @@ namespace Ade_Framework
         public static void OnReportEvent(ReportName eventName, Dictionary<string, object> keyValues)
         {
 
-#if UNITY_EDITOR && !Ade_TT && !Ade_WX
+#if Ade_Debug || UNITY_EDITOR && !Ade_TT && !Ade_WX
            
 #elif Ade_TT
             TT.ReportAnalytics(eventName.ToString(), keyValues);
@@ -395,7 +406,9 @@ namespace Ade_Framework
         /// <returns></returns>
         public VideoRecordState GetVideoRecordState()
         {
-#if !Ade_TT && !Ade_WX
+#if Ade_Debug
+              return VideoRecordState.RECORD_ERROR;
+#elif !Ade_TT && !Ade_WX
               return VideoRecordState.RECORD_ERROR;
 #elif Ade_TT
             return (VideoRecordState)m_TTGameRecorder.GetVideoRecordState();
@@ -411,7 +424,9 @@ namespace Ade_Framework
         /// <returns></returns>
         public int GetVideoRecordDuration()
         {
-#if !Ade_TT && !Ade_WX
+#if Ade_Debug
+              return 0;
+#elif !Ade_TT && !Ade_WX
               return 0;
 #elif Ade_TT
                 return 99;
@@ -428,7 +443,10 @@ namespace Ade_Framework
         public void RecordVideoTestShare(Action<bool> action)
         {
             RecordVideoTestShareBack = action;
-#if UNITY_EDITOR && !Ade_TT && !Ade_WX
+#if Ade_Debug
+            action?.Invoke(true);
+            RecordVideoTestShareBack = null;
+#elif UNITY_EDITOR && !Ade_TT && !Ade_WX
 
 #elif Ade_TT
             LogManager.Log(GetVideoRecordState());
@@ -483,7 +501,9 @@ namespace Ade_Framework
         /// <param name="shareAppMessageAction">转发成功回调</param>
         public void OnShare(Action shareAppMessageAction = null)
         {
-#if Ade_TT
+#if Ade_Debug
+            shareAppMessageAction?.Invoke();
+#elif Ade_TT
             Debug.Log("转发id"+_AdeDataInfo.ShareId);
             var param = new JsonData
             {
@@ -519,6 +539,9 @@ namespace Ade_Framework
         /// </summary>
         public void GetSidebar()
         {
+#if Ade_Debug
+            SidebarBack?.Invoke();
+#else
             var data = new JsonData
             {
                 ["scene"] = "sidebar",
@@ -533,6 +556,7 @@ namespace Ade_Framework
             {
                 Debug.Log($"navigate to scene error, errCode:{errCode}, errMsg:{errMsg}");
             });
+#endif
         }
 #elif Ade_KS
         /// <summary>
@@ -591,7 +615,13 @@ namespace Ade_Framework
         {
             LoginAction = action;
 #if Ade_TT
+#if Ade_Debug
+            LoginAction?.Invoke(true);
+#else
             TT.Login(LoginSuccess, LoginFailed, true);
+#endif
+#else
+            LoginAction?.Invoke(true);
 #endif
         }
 
@@ -679,7 +709,9 @@ namespace Ade_Framework
         public void OnRequestSubscribeMessage(Action SuccessAction) 
         {
             LogManager.Log("拉起订阅");
-#if UNITY_EDITOR && !Ade_TT && !Ade_WX
+#if Ade_Debug
+            SuccessAction?.Invoke();
+#elif UNITY_EDITOR && !Ade_TT && !Ade_WX
 #elif Ade_TT
             TT.RequestSubscribeMessage(_AdeDataInfo.SubscribeTmplIds, (msg) => 
             {
@@ -717,7 +749,7 @@ namespace Ade_Framework
         }
 
 #if UNITY_EDITOR
-        public const string EditorFeedLaunchModePlayerPrefsKey = "Ade.Editor.FeedLaunchMode";
+        public const string EditorFeedLaunchModeEditorPrefsKey = "Ade.Editor.FeedLaunchMode";
 #endif
 
         public bool IsFeedSubscribe;
@@ -804,7 +836,7 @@ namespace Ade_Framework
         private bool TryHandleEditorFeedLaunchScene(Action onFeedDirectPlay, Action onFeedAcquisition, Action onNone)
         {
             FeedSceneType editorLaunchMode =
-                (FeedSceneType)PlayerPrefs.GetInt(EditorFeedLaunchModePlayerPrefsKey, (int)FeedSceneType.None);
+                (FeedSceneType)EditorPrefs.GetInt(EditorFeedLaunchModeEditorPrefsKey, (int)FeedSceneType.None);
             CurrentFeedScene = editorLaunchMode;
             isFeedPlay = editorLaunchMode != FeedSceneType.None;
 
@@ -854,6 +886,11 @@ namespace Ade_Framework
         /// <param name="onFail">订阅失败回调</param>
         public void RequestFeedSubscribe(Action onSuccess = null, Action<string> onFail = null)
         {
+#if Ade_Debug
+            IsFeedSubscribe = true;
+            onSuccess?.Invoke();
+            return;
+#endif
             // 检查是否配置了contentIDs
             if (_AdeDataInfo.FeedContentIDs == null || _AdeDataInfo.FeedContentIDs.Count == 0)
             {
@@ -915,7 +952,8 @@ namespace Ade_Framework
         /// <param name="onResult">结果回调(是否已订阅)</param>
         public void CheckFeedSubscribeStatus(Action<bool> onResult)
         {
-#if UNITY_EDITOR
+#if UNITY_EDITOR || Ade_Debug
+            onResult?.Invoke(IsFeedSubscribe);
             return;
 #endif
             var param = new JsonData
@@ -1001,7 +1039,7 @@ namespace Ade_Framework
             {
                 LogManager.Log("复访推荐流单独上报错误：" + info.ErrMsg);
             };
-#if !UNITY_EDITOR
+#if !UNITY_EDITOR && !Ade_Debug
             TT.StoreFeedData(storeFeedData);
 #endif
 
@@ -1029,7 +1067,7 @@ namespace Ade_Framework
             {
                 LogManager.Log("复访推荐流单独上报错误：" + info.ErrMsg);
             };
-#if !UNITY_EDITOR
+#if !UNITY_EDITOR && !Ade_Debug
             TT.StoreFeedData(storeFeedData);
 #endif
 
