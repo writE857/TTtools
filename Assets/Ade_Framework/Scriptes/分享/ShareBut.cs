@@ -19,6 +19,11 @@ public class ShareBut : MonoBehaviour
         {
             AdeSDK.Instance.OnShare();
         });
+#elif Ade_KS
+        gameObject.GetComponent<Button>().onClick.AddListener(() =>
+        {
+            AdeSDK.Instance.OnShare();
+        });
 #else
         gameObject.SetActive(false);
 #endif

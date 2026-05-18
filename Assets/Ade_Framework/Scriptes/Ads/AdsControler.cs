@@ -5,6 +5,7 @@ using System.Collections.Generic;
 
 #if Ade_TT
 using TTSDK;
+using TTSDK.UNBridgeLib.LitJson;
 #elif Ade_WX      
 using WeChatWASM;
 #elif Ade_KS
@@ -281,6 +282,31 @@ namespace Ade_Framework
             }
         }
 
+        public void ShowMoreGames()
+        {
+#if Ade_TT && !UNITY_EDITOR && !Ade_Debug
+            if (!TryGetMoreGamesData(out MoreGamesData moreGamesData))
+            {
+                return;
+            }
+
+            try
+            {
+                TT.CreateGridGamePanel(
+                    GetTTMoreGamesGridCount(moreGamesData.GridCount),
+                    BuildMoreGamesQuery(moreGamesData),
+                    GetTTMoreGamesSize(moreGamesData.Size),
+                    BuildMoreGamesPosition(moreGamesData)).Show();
+            }
+            catch (Exception exception)
+            {
+                LogManager.LogError($"更多游戏展示失败:{exception.Message}");
+            }
+#else
+            LogManager.Log("展示更多游戏", Color.yellow);
+#endif
+        }
+
         void ResetGridAds()
         {
             foreach (GridAd gridAd in GridKeyValue.Values)
@@ -374,6 +400,90 @@ namespace Ade_Framework
 
             return true;
         }
+
+        bool TryGetMoreGamesData(out MoreGamesData moreGamesData)
+        {
+            moreGamesData = null;
+
+            if (adsPlatformData == null)
+            {
+                LogManager.LogError("广告配置未初始化");
+                return false;
+            }
+
+            if (adsPlatformData.MoreGames == null)
+            {
+                LogManager.LogError("更多游戏配置未初始化");
+                return false;
+            }
+
+            moreGamesData = adsPlatformData.MoreGames;
+            return true;
+        }
+
+#if Ade_TT
+        JsonData BuildMoreGamesQuery(MoreGamesData moreGamesData)
+        {
+            JsonData query = new JsonData();
+            if (moreGamesData == null || moreGamesData.Queries == null)
+            {
+                return query;
+            }
+
+            foreach (MoreGamesQueryData item in moreGamesData.Queries)
+            {
+                if (item == null || string.IsNullOrWhiteSpace(item.AppId))
+                {
+                    continue;
+                }
+
+                query[item.AppId.Trim()] = item.Query ?? string.Empty;
+            }
+
+            return query;
+        }
+
+        JsonData BuildMoreGamesPosition(MoreGamesData moreGamesData)
+        {
+            JsonData position = new JsonData();
+            if (moreGamesData == null || !moreGamesData.CustomPosition || moreGamesData.GridCount != MoreGamesPanelCount.One)
+            {
+                return position;
+            }
+
+            position["top"] = moreGamesData.Top;
+            position["left"] = moreGamesData.Left;
+            return position;
+        }
+
+        TTGridGamePanelManager.GridGamePanelCount GetTTMoreGamesGridCount(MoreGamesPanelCount count)
+        {
+            switch (count)
+            {
+                case MoreGamesPanelCount.One:
+                    return TTGridGamePanelManager.GridGamePanelCount.One;
+                case MoreGamesPanelCount.Four:
+                    return TTGridGamePanelManager.GridGamePanelCount.Four;
+                case MoreGamesPanelCount.Nine:
+                default:
+                    return TTGridGamePanelManager.GridGamePanelCount.Nine;
+            }
+        }
+
+        TTGridGamePanelManager.GridGamePanelSize GetTTMoreGamesSize(MoreGamesPanelSize size)
+        {
+            switch (size)
+            {
+                case MoreGamesPanelSize.Small:
+                    return TTGridGamePanelManager.GridGamePanelSize.Small;
+                case MoreGamesPanelSize.Medium:
+                    return TTGridGamePanelManager.GridGamePanelSize.Medium;
+                case MoreGamesPanelSize.Large:
+                default:
+                    return TTGridGamePanelManager.GridGamePanelSize.Large;
+            }
+        }
+#endif
     }
 
 }

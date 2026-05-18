@@ -71,6 +71,60 @@ public class GridAdData
 }
 
 [System.Serializable]
+public enum MoreGamesPanelCount
+{
+    [InspectorName("单宫格")]
+    One,
+    [InspectorName("四宫格")]
+    Four,
+    [InspectorName("九宫格")]
+    Nine
+}
+
+[System.Serializable]
+public enum MoreGamesPanelSize
+{
+    [InspectorName("大")]
+    Large,
+    [InspectorName("中")]
+    Medium,
+    [InspectorName("小")]
+    Small
+}
+
+[System.Serializable]
+public class MoreGamesQueryData
+{
+    [InspectorName("目标AppID")]
+    public string AppId;
+
+    [InspectorName("Query")]
+    public string Query;
+}
+
+[System.Serializable]
+public class MoreGamesData
+{
+    [InspectorName("宫格数量")]
+    public MoreGamesPanelCount GridCount = MoreGamesPanelCount.Nine;
+
+    [InspectorName("宫格尺寸")]
+    public MoreGamesPanelSize Size = MoreGamesPanelSize.Medium;
+
+    [InspectorName("自定义位置")]
+    public bool CustomPosition;
+
+    [InspectorName("Top")]
+    public int Top;
+
+    [InspectorName("Left")]
+    public int Left;
+
+    [InspectorName("Query列表")]
+    public List<MoreGamesQueryData> Queries = new List<MoreGamesQueryData>();
+}
+
+[System.Serializable]
 public class AdsPlatformData
 {
     public string ID;
@@ -79,4 +133,6 @@ public class AdsPlatformData
     public AdItemData[] RewardID;
     [InspectorName("格子广告列表")]
     public List<GridAdData> GridAdList = new List<GridAdData>();
+    [InspectorName("更多游戏")]
+    public MoreGamesData MoreGames = new MoreGamesData();
 }

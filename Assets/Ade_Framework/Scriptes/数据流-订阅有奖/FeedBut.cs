@@ -13,6 +13,17 @@ public class FeedBut : MonoBehaviour
     }
     private void Start()
     {
+        if (AdeSDK.Instance._AdeDataInfo == null ||
+            AdeSDK.Instance._AdeDataInfo.FeedContentIDs == null ||
+            AdeSDK.Instance._AdeDataInfo.FeedContentIDs.Count == 0)
+        {
+            Close();
+            return;
+        }
+
+#if !Ade_TT
+        Close();
+#else
         Close();
 
         gameObject.GetComponent<Button>().onClick.AddListener(() =>
@@ -20,7 +31,6 @@ public class FeedBut : MonoBehaviour
             FeedPlane.Instance.Show();
         });
 
-#if Ade_TT
         AdeSDK.Instance.CheckFeedSubscribeStatus((ison) =>
         {
             gameObject.SetActive(!ison);
@@ -30,7 +40,9 @@ public class FeedBut : MonoBehaviour
 
     public void Show()
     {
+#if Ade_TT
         gameObject.SetActive(true);
+#endif
     }
 
     public void Close()

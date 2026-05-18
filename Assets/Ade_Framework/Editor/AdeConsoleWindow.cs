@@ -68,18 +68,22 @@ public class AdeConsoleWindow : EditorWindow
     readonly List<string> feedContentDrafts = new();
     readonly List<AdItemDraft> rewardAdDrafts = new();
     readonly List<GridAdDraft> gridAdDrafts = new();
+    readonly MoreGamesDraft moreGamesDraft = new();
+    readonly List<MoreGamesQueryDraft> moreGamesQueryDrafts = new();
     readonly List<string> editableCustomSymbols = new();
     readonly ListSelectionState customSymbolSelection = new();
     readonly ListSelectionState subscribeTemplateSelection = new();
     readonly ListSelectionState feedContentSelection = new();
     readonly ListSelectionState rewardAdSelection = new();
     readonly ListSelectionState gridAdSelection = new();
+    readonly ListSelectionState moreGamesQuerySelection = new();
     readonly ListSelectionState livePathSceneTextSelection = new();
     ReorderableList customSymbolList;
     ReorderableList subscribeTemplateList;
     ReorderableList feedContentList;
     ReorderableList rewardAdList;
     ReorderableList gridAdList;
+    ReorderableList moreGamesQueryList;
     ReorderableList livePathSceneTextList;
     ListSelectionState activeListSelection;
     ReorderableList activeReorderableList;
@@ -106,7 +110,7 @@ public class AdeConsoleWindow : EditorWindow
 
     void EnsureEditorStateInitialized()
     {
-        if (customSymbolList != null && subscribeTemplateList != null && feedContentList != null && rewardAdList != null && gridAdList != null && livePathSceneTextList != null)
+        if (customSymbolList != null && subscribeTemplateList != null && feedContentList != null && rewardAdList != null && gridAdList != null && moreGamesQueryList != null && livePathSceneTextList != null)
         {
             return;
         }
@@ -116,6 +120,7 @@ public class AdeConsoleWindow : EditorWindow
         feedContentList = CreateStringListEditor(feedContentDrafts, "推荐流内容", feedContentSelection, () => rewardConfigDirty = true);
         rewardAdList = CreateAdItemListEditor(rewardAdDrafts, "激励参数", rewardAdSelection);
         gridAdList = CreateGridAdListEditor(gridAdDrafts, "格子广告参数", gridAdSelection);
+        moreGamesQueryList = CreateMoreGamesQueryListEditor(moreGamesQueryDrafts, "更多游戏 Query", moreGamesQuerySelection);
         livePathSceneTextList = CreateLivePathSceneTextListEditor();
         LoadRewardConfigDrafts();
     }
@@ -843,6 +848,13 @@ public class AdeConsoleWindow : EditorWindow
             {
                 EditorGUILayout.PropertyField(gridAdProperty, new GUIContent("格子广告"), true);
             }
+
+            SerializedProperty moreGamesProperty = adDataProperty.FindPropertyRelative("MoreGames");
+            if (moreGamesProperty != null)
+            {
+                EditorGUILayout.PropertyField(moreGamesProperty, new GUIContent("更多游戏"), true);
+            }
+
             if (EditorGUI.EndChangeCheck())
             {
                 SaveSerializedChanges(serializedObject, adsData);
@@ -861,6 +873,8 @@ public class AdeConsoleWindow : EditorWindow
             rewardAdList.DoLayoutList();
             EditorGUILayout.Space(2f);
             gridAdList.DoLayoutList();
+            EditorGUILayout.Space(2f);
+            DrawMoreGamesDraftFields();
         }
     }
 
@@ -878,6 +892,35 @@ public class AdeConsoleWindow : EditorWindow
         if (DrawCompactAdItemFields(fieldRect, draft))
         {
             rewardConfigDirty = true;
+        }
+    }
+
+    void DrawMoreGamesDraftFields()
+    {
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField("更多游戏参数", EditorStyles.miniBoldLabel);
+
+            Rect rowRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight + 2f);
+            rowRect.y += 1f;
+            rowRect.height = EditorGUIUtility.singleLineHeight;
+            if (DrawCompactMoreGamesFields(rowRect, moreGamesDraft))
+            {
+                rewardConfigDirty = true;
+            }
+
+            using (new EditorGUI.DisabledScope(moreGamesDraft.GridCount != MoreGamesPanelCount.One))
+            {
+                Rect positionRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight + 2f);
+                positionRect.y += 1f;
+                positionRect.height = EditorGUIUtility.singleLineHeight;
+                if (DrawCompactMoreGamesPositionFields(positionRect, moreGamesDraft))
+                {
+                    rewardConfigDirty = true;
+                }
+            }
+
+            moreGamesQueryList.DoLayoutList();
         }
     }
 
@@ -1182,6 +1225,60 @@ public class AdeConsoleWindow : EditorWindow
         return reorderableList;
     }
 
+    ReorderableList CreateMoreGamesQueryListEditor(List<MoreGamesQueryDraft> list, string header, ListSelectionState selection)
+    {
+        var reorderableList = new ReorderableList(list, typeof(MoreGamesQueryDraft), true, true, true, true);
+        reorderableList.drawHeaderCallback = rect => EditorGUI.LabelField(rect, header);
+        reorderableList.drawElementBackgroundCallback = (rect, index, isActive, isFocused) =>
+        {
+            DrawSelectableRowBackground(rect, selection.IsSelected(index));
+        };
+        reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
+        {
+            if (index < 0 || index >= list.Count)
+            {
+                return;
+            }
+
+            MoreGamesQueryDraft item = list[index];
+            Rect selectionRect = GetSelectionRect(rect);
+            DrawSelectionHandle(selectionRect, selection.IsSelected(index));
+            if (HandleSelectionClick(rect, selectionRect, index, selection, reorderableList))
+            {
+                return;
+            }
+
+            Rect fieldRect = GetListContentRect(rect);
+            fieldRect.y += 3f;
+            fieldRect.height = EditorGUIUtility.singleLineHeight;
+            if (DrawCompactMoreGamesQueryFields(fieldRect, item))
+            {
+                rewardConfigDirty = true;
+            }
+        };
+        reorderableList.onAddCallback = _ =>
+        {
+            list.Add(new MoreGamesQueryDraft());
+            selection.SelectSingle(list.Count - 1);
+            rewardConfigDirty = true;
+        };
+        reorderableList.onRemoveCallback = reorderable =>
+        {
+            if (RemoveSelectedItems(list, reorderable, selection))
+            {
+                rewardConfigDirty = true;
+            }
+        };
+        reorderableList.onReorderCallback = reorderable =>
+        {
+            selection.SelectSingle(reorderable.index);
+            rewardConfigDirty = true;
+        };
+        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight + 8f;
+        reorderableList.footerHeight = 22f;
+        return reorderableList;
+    }
+
     ReorderableList CreateLivePathSceneTextListEditor()
     {
         var reorderableList = new ReorderableList(livePathSceneTextDrafts, typeof(LivePathSceneTextDraft), false, true, false, false);
@@ -1330,6 +1427,122 @@ public class AdeConsoleWindow : EditorWindow
         return changed;
     }
 
+    bool DrawCompactMoreGamesFields(Rect fieldRect, MoreGamesDraft item)
+    {
+        float gap = 6f;
+        float usableWidth = fieldRect.width - gap * 2f;
+        float countWidth = Mathf.Floor(usableWidth * 0.34f);
+        float sizeWidth = Mathf.Floor(usableWidth * 0.31f);
+        Rect countRect = new Rect(fieldRect.x, fieldRect.y, countWidth, fieldRect.height);
+        Rect sizeRect = new Rect(countRect.xMax + gap, fieldRect.y, sizeWidth, fieldRect.height);
+        Rect customRect = new Rect(sizeRect.xMax + gap, fieldRect.y, fieldRect.xMax - sizeRect.xMax - gap, fieldRect.height);
+
+        bool changed = false;
+        float previousLabelWidth = EditorGUIUtility.labelWidth;
+        try
+        {
+            EditorGUIUtility.labelWidth = 60f;
+            MoreGamesPanelCount newCount = (MoreGamesPanelCount)EditorGUI.EnumPopup(countRect, "宫格数量", item.GridCount);
+            if (newCount != item.GridCount)
+            {
+                item.GridCount = newCount;
+                changed = true;
+            }
+
+            EditorGUIUtility.labelWidth = 34f;
+            MoreGamesPanelSize newSize = (MoreGamesPanelSize)EditorGUI.EnumPopup(sizeRect, "尺寸", item.Size);
+            if (newSize != item.Size)
+            {
+                item.Size = newSize;
+                changed = true;
+            }
+
+            EditorGUIUtility.labelWidth = 70f;
+            bool newCustomPosition = EditorGUI.Toggle(customRect, "自定义位置", item.CustomPosition);
+            if (newCustomPosition != item.CustomPosition)
+            {
+                item.CustomPosition = newCustomPosition;
+                changed = true;
+            }
+        }
+        finally
+        {
+            EditorGUIUtility.labelWidth = previousLabelWidth;
+        }
+
+        return changed;
+    }
+
+    bool DrawCompactMoreGamesPositionFields(Rect fieldRect, MoreGamesDraft item)
+    {
+        float gap = 6f;
+        float usableWidth = fieldRect.width - gap;
+        float topWidth = Mathf.Floor(usableWidth * 0.5f);
+        Rect topRect = new Rect(fieldRect.x, fieldRect.y, topWidth, fieldRect.height);
+        Rect leftRect = new Rect(topRect.xMax + gap, fieldRect.y, fieldRect.xMax - topRect.xMax - gap, fieldRect.height);
+
+        bool changed = false;
+        float previousLabelWidth = EditorGUIUtility.labelWidth;
+        try
+        {
+            EditorGUIUtility.labelWidth = 28f;
+            int newTop = EditorGUI.IntField(topRect, "Top", item.Top);
+            if (newTop != item.Top)
+            {
+                item.Top = newTop;
+                changed = true;
+            }
+
+            int newLeft = EditorGUI.IntField(leftRect, "Left", item.Left);
+            if (newLeft != item.Left)
+            {
+                item.Left = newLeft;
+                changed = true;
+            }
+        }
+        finally
+        {
+            EditorGUIUtility.labelWidth = previousLabelWidth;
+        }
+
+        return changed;
+    }
+
+    bool DrawCompactMoreGamesQueryFields(Rect fieldRect, MoreGamesQueryDraft item)
+    {
+        float gap = 6f;
+        float appIdWidth = Mathf.Floor((fieldRect.width - gap) * 0.42f);
+        Rect appIdRect = new Rect(fieldRect.x, fieldRect.y, appIdWidth, fieldRect.height);
+        Rect queryRect = new Rect(appIdRect.xMax + gap, fieldRect.y, fieldRect.xMax - appIdRect.xMax - gap, fieldRect.height);
+
+        bool changed = false;
+        float previousLabelWidth = EditorGUIUtility.labelWidth;
+        try
+        {
+            EditorGUIUtility.labelWidth = 48f;
+            string newAppId = EditorGUI.TextField(appIdRect, "AppID", item.AppId);
+            if (newAppId != item.AppId)
+            {
+                item.AppId = newAppId;
+                changed = true;
+            }
+
+            EditorGUIUtility.labelWidth = 42f;
+            string newQuery = EditorGUI.TextField(queryRect, "Query", item.Query);
+            if (newQuery != item.Query)
+            {
+                item.Query = newQuery;
+                changed = true;
+            }
+        }
+        finally
+        {
+            EditorGUIUtility.labelWidth = previousLabelWidth;
+        }
+
+        return changed;
+    }
+
     Vector2 DrawCompactVector2Field(Rect rect, string label, Vector2 value)
     {
         float labelWidth = 28f;
@@ -1377,6 +1590,7 @@ public class AdeConsoleWindow : EditorWindow
         {
             NormalizeRewardArray(asset);
             NormalizeGridAdList(asset);
+            NormalizeMoreGamesQueries(asset);
         }
     }
 
@@ -1571,6 +1785,83 @@ public class AdeConsoleWindow : EditorWindow
         EditorUtility.SetDirty(adsData);
     }
 
+    void NormalizeMoreGamesQueries(UnityEngine.Object adsData)
+    {
+        var adDataField = adsData.GetType().GetField("AdData");
+        if (adDataField == null)
+        {
+            return;
+        }
+
+        object adDataValue = adDataField.GetValue(adsData);
+        object moreGamesValue = GetFieldValue(adDataValue, "MoreGames");
+        if (moreGamesValue == null)
+        {
+            return;
+        }
+
+        var queryField = moreGamesValue.GetType().GetField("Queries");
+        if (queryField == null)
+        {
+            return;
+        }
+
+        if (!(queryField.GetValue(moreGamesValue) is IEnumerable queryItems))
+        {
+            return;
+        }
+
+        if (EditorGUIUtility.editingTextField)
+        {
+            return;
+        }
+
+        Type queryType = FindType("MoreGamesQueryData");
+        if (queryType == null)
+        {
+            return;
+        }
+
+        var appIdField = queryType.GetField("AppId");
+        if (appIdField == null)
+        {
+            return;
+        }
+
+        IList validItems = Activator.CreateInstance(typeof(List<>).MakeGenericType(queryType)) as IList;
+        if (validItems == null)
+        {
+            return;
+        }
+
+        int sourceCount = 0;
+        foreach (object item in queryItems)
+        {
+            sourceCount++;
+            if (item == null)
+            {
+                continue;
+            }
+
+            string appIdValue = (appIdField.GetValue(item) as string)?.Trim();
+            if (string.IsNullOrWhiteSpace(appIdValue))
+            {
+                continue;
+            }
+
+            appIdField.SetValue(item, appIdValue);
+            validItems.Add(item);
+        }
+
+        if (validItems.Count == sourceCount)
+        {
+            return;
+        }
+
+        queryField.SetValue(moreGamesValue, validItems);
+        EditorUtility.SetDirty(adsData);
+    }
+
     string GetStringFieldValue(object target, string fieldName)
     {
         return GetFieldValue(target, fieldName) as string ?? string.Empty;
@@ -1663,6 +1954,33 @@ public class AdeConsoleWindow : EditorWindow
         }
 
         foreach (object item in gridItems)
+        {
+            items.Add(item);
+        }
+
+        return items;
+    }
+
+    List<object> GetMoreGamesQueryItems(object moreGamesValue)
+    {
+        List<object> items = new List<object>();
+        if (moreGamesValue == null)
+        {
+            return items;
+        }
+
+        var queryField = moreGamesValue.GetType().GetField("Queries");
+        if (queryField == null)
+        {
+            return items;
+        }
+
+        if (!(queryField.GetValue(moreGamesValue) is IEnumerable queryItems))
+        {
+            return items;
+        }
+
+        foreach (object item in queryItems)
         {
             items.Add(item);
         }
@@ -2301,47 +2619,6 @@ public class AdeConsoleWindow : EditorWindow
             }
         }
 
-        changed |= ApplyLivePathTextByReflection(instance, normalizedText);
-        return changed;
-    }
-
-    bool ApplyLivePathTextByReflection(GameObject instance, string sceneText)
-    {
-        bool changed = false;
-        Component[] components = instance.GetComponentsInChildren<Component>(true);
-        foreach (Component component in components)
-        {
-            if (component == null)
-            {
-                continue;
-            }
-
-            Type type = component.GetType();
-            string typeName = type.FullName;
-            if (typeName != "TMPro.TextMeshProUGUI" && typeName != "TMPro.TextMeshPro")
-            {
-                continue;
-            }
-
-            var textProperty = type.GetProperty("text");
-            if (textProperty == null || !textProperty.CanRead || !textProperty.CanWrite)
-            {
-                continue;
-            }
-
-            string currentText = textProperty.GetValue(component) as string ?? string.Empty;
-            if (currentText == sceneText)
-            {
-                continue;
-            }
-
-            Undo.RecordObject(component, "设置直播路径文字");
-            textProperty.SetValue(component, sceneText);
-            PrefabUtility.RecordPrefabInstancePropertyModifications(component);
-            EditorUtility.SetDirty(component);
-            changed = true;
-        }
-
         return changed;
     }
 
@@ -2416,6 +2693,8 @@ public class AdeConsoleWindow : EditorWindow
                 LoadGridAdDraft(draft, gridItem);
                 gridAdDrafts.Add(draft);
             }
+
+            LoadMoreGamesDraft(GetFieldValue(adDataValue, "MoreGames"));
         }
 
         rewardConfigDirty = false;
@@ -2423,6 +2702,7 @@ public class AdeConsoleWindow : EditorWindow
         feedContentSelection.Clear();
         rewardAdSelection.Clear();
         gridAdSelection.Clear();
+        moreGamesQuerySelection.Clear();
     }
 
     void SaveRewardConfigDrafts()
@@ -2448,6 +2728,7 @@ public class AdeConsoleWindow : EditorWindow
             SaveAdItemDraft(bannerAdDraft, GetFieldValue(adDataValue, "BannerID"));
             SetRewardItemsFromDrafts(adDataValue, rewardAdDrafts);
             SetGridAdItemsFromDrafts(adDataValue, gridAdDrafts);
+            SaveMoreGamesDraft(GetFieldValue(adDataValue, "MoreGames"));
             SaveReflectedAssetChanges(adsData);
         }
 
@@ -2566,6 +2847,97 @@ public class AdeConsoleWindow : EditorWindow
         }
 
         gridField.SetValue(adDataValue, gridList);
+    }
+
+    void LoadMoreGamesDraft(object moreGamesValue)
+    {
+        moreGamesQueryDrafts.Clear();
+
+        if (moreGamesValue == null)
+        {
+            moreGamesDraft.GridCount = MoreGamesPanelCount.Nine;
+            moreGamesDraft.Size = MoreGamesPanelSize.Medium;
+            moreGamesDraft.CustomPosition = false;
+            moreGamesDraft.Top = 0;
+            moreGamesDraft.Left = 0;
+            return;
+        }
+
+        object gridCountValue = GetFieldValue(moreGamesValue, "GridCount");
+        moreGamesDraft.GridCount = gridCountValue is MoreGamesPanelCount gridCount ? gridCount : MoreGamesPanelCount.Nine;
+
+        object sizeValue = GetFieldValue(moreGamesValue, "Size");
+        moreGamesDraft.Size = sizeValue is MoreGamesPanelSize size ? size : MoreGamesPanelSize.Medium;
+
+        object customPositionValue = GetFieldValue(moreGamesValue, "CustomPosition");
+        moreGamesDraft.CustomPosition = customPositionValue is bool customPosition && customPosition;
+
+        object topValue = GetFieldValue(moreGamesValue, "Top");
+        moreGamesDraft.Top = topValue is int top ? top : 0;
+
+        object leftValue = GetFieldValue(moreGamesValue, "Left");
+        moreGamesDraft.Left = leftValue is int left ? left : 0;
+
+        foreach (object queryItem in GetMoreGamesQueryItems(moreGamesValue))
+        {
+            moreGamesQueryDrafts.Add(new MoreGamesQueryDraft
+            {
+                AppId = GetStringFieldValue(queryItem, "AppId"),
+                Query = GetStringFieldValue(queryItem, "Query")
+            });
+        }
+    }
+
+    void SaveMoreGamesDraft(object moreGamesValue)
+    {
+        if (moreGamesValue == null)
+        {
+            return;
+        }
+
+        SetFieldValue(moreGamesValue, "GridCount", moreGamesDraft.GridCount);
+        SetFieldValue(moreGamesValue, "Size", moreGamesDraft.Size);
+        SetFieldValue(moreGamesValue, "CustomPosition", moreGamesDraft.CustomPosition);
+        SetFieldValue(moreGamesValue, "Top", moreGamesDraft.Top);
+        SetFieldValue(moreGamesValue, "Left", moreGamesDraft.Left);
+        SetMoreGamesQueryItemsFromDrafts(moreGamesValue, moreGamesQueryDrafts);
+    }
+
+    void SetMoreGamesQueryItemsFromDrafts(object moreGamesValue, List<MoreGamesQueryDraft> drafts)
+    {
+        if (moreGamesValue == null)
+        {
+            return;
+        }
+
+        var queryField = moreGamesValue.GetType().GetField("Queries");
+        if (queryField == null)
+        {
+            return;
+        }
+
+        Type queryType = FindType("MoreGamesQueryData");
+        if (queryType == null)
+        {
+            return;
+        }
+
+        Type listType = typeof(List<>).MakeGenericType(queryType);
+        IList queryList = Activator.CreateInstance(listType) as IList;
+        if (queryList == null)
+        {
+            return;
+        }
+
+        foreach (MoreGamesQueryDraft draft in drafts)
+        {
+            object queryItem = Activator.CreateInstance(queryType);
+            SetFieldValue(queryItem, "AppId", draft.AppId ?? string.Empty);
+            SetFieldValue(queryItem, "Query", draft.Query ?? string.Empty);
+            queryList.Add(queryItem);
+        }
+
+        queryField.SetValue(moreGamesValue, queryList);
     }
 
     void LoadFeedLaunchMode()
@@ -2943,6 +3315,8 @@ public class AdeConsoleWindow : EditorWindow
         Type adsPlatformDataType = FindType("AdsPlatformData");
         Type adItemDataType = FindType("AdItemData");
         Type gridAdDataType = FindType("GridAdData");
+        Type moreGamesDataType = FindType("MoreGamesData");
+        Type moreGamesQueryDataType = FindType("MoreGamesQueryData");
         if (adsPlatformDataType == null || adItemDataType == null)
         {
             return;
@@ -2972,6 +3346,19 @@ public class AdeConsoleWindow : EditorWindow
             Type listType = typeof(List<>).MakeGenericType(gridAdDataType);
             gridField.SetValue(adDataValue, Activator.CreateInstance(listType));
             EditorUtility.SetDirty(adsData);
+        }
+
+        if (moreGamesDataType != null)
+        {
+            EnsureNestedObjectField(adDataValue, "MoreGames", moreGamesDataType, adsData);
+            object moreGamesValue = GetFieldValue(adDataValue, "MoreGames");
+            var queryField = moreGamesDataType.GetField("Queries");
+            if (moreGamesValue != null && queryField != null && queryField.GetValue(moreGamesValue) == null && moreGamesQueryDataType != null)
+            {
+                Type listType = typeof(List<>).MakeGenericType(moreGamesQueryDataType);
+                queryField.SetValue(moreGamesValue, Activator.CreateInstance(listType));
+                EditorUtility.SetDirty(adsData);
+            }
         }
     }
 
@@ -3014,6 +3401,21 @@ public class AdeConsoleWindow : EditorWindow
         public string AdUnitId = string.Empty;
         public GridAnchorType Anchor = GridAnchorType.Bottom;
         public Vector2 Position = Vector2.zero;
+    }
+
+    class MoreGamesDraft
+    {
+        public MoreGamesPanelCount GridCount = MoreGamesPanelCount.Nine;
+        public MoreGamesPanelSize Size = MoreGamesPanelSize.Medium;
+        public bool CustomPosition;
+        public int Top;
+        public int Left;
+    }
+
+    class MoreGamesQueryDraft
+    {
+        public string AppId = string.Empty;
+        public string Query = string.Empty;
     }
 
     [Serializable]

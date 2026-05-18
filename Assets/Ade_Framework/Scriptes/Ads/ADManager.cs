@@ -80,6 +80,11 @@ public class ADManager : Single<ADManager>
 
     }
 
+    public void ShowReward(Action action)
+    {
+        ShowRewardAD(action);
+    }
+
     public void ShowBanner()
     {
 #if ADE_NO_ADS
@@ -140,6 +145,15 @@ public class ADManager : Single<ADManager>
         Debug.Log("ADManager: 无广模式，格子广告无需隐藏");
 #else
         AdsControler.Instance.HideAllGridAds();
+#endif
+    }
+
+    public void ShowMoreGames()
+    {
+#if ADE_NO_ADS
+        Debug.Log("ADManager: 无广模式，跳过更多游戏");
+#else
+        AdsControler.Instance.ShowMoreGames();
 #endif
     }
 }

@@ -1,17 +1,17 @@
-using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
-[RequireComponent(typeof(TMP_Text))]
+[RequireComponent(typeof(Text))]
 public class NoAdTicketText : MonoBehaviour
 {
     [SerializeField] string prefix = "X";
-    [SerializeField] TMP_Text targetText;
+    [SerializeField] Text targetText;
 
     void Awake()
     {
         if (targetText == null)
         {
-            targetText = GetComponent<TMP_Text>();
+            targetText = GetComponent<Text>();
         }
     }
 
@@ -28,9 +28,11 @@ public class NoAdTicketText : MonoBehaviour
 
     void UpdateText(int count)
     {
-        if (targetText != null)
+        if (targetText == null)
         {
-            targetText.text = $"{prefix}{count}";
+            return;
         }
+
+        targetText.text = $"{prefix}{count}";
     }
 }

@@ -15,38 +15,11 @@ public class SidebarUI : MonoBehaviour
     public Button LinQuBut;
     public Button ClockBut;
 
-    [Header("Auto Bind")]
-    [HideInInspector]
-    [SerializeField] bool autoBindByName = false;
-
-    [HideInInspector]
-    [SerializeField] List<AdePopupImageReplaceItem> replaceImageEntries = new List<AdePopupImageReplaceItem>();
-
     [Header("Events")]
     [SerializeField] UnityEvent onRewardClaimed = new UnityEvent();
 
     bool canClaimReward;
     Action rewardClaimCallback;
-
-    void Reset()
-    {
-        AutoBindControls(force: true);
-    }
-
-#if UNITY_EDITOR
-    void OnValidate()
-    {
-        if (!Application.isPlaying)
-        {
-            AutoBindControls(force: false);
-        }
-    }
-#endif
-
-    void Awake()
-    {
-        AutoBindControls(force: false);
-    }
 
     void Start()
     {
@@ -66,12 +39,6 @@ public class SidebarUI : MonoBehaviour
     void OnDestroy()
     {
         UnbindButtonListeners();
-    }
-
-    [ContextMenu("Auto Bind Buttons")]
-    void AutoBindButtonsContext()
-    {
-        AutoBindControls(force: true);
     }
 
     void BindButtonListeners()
@@ -163,41 +130,6 @@ public class SidebarUI : MonoBehaviour
         }
     }
 
-    void AutoBindControls(bool force)
-    {
-        AssignIfNeeded(ref GoBut, AdePopupButtonSlot.SlotType.Go, "GO", force, autoBindByName);
-        AssignIfNeeded(ref LinQuBut, AdePopupButtonSlot.SlotType.Claim, "LinQu", force, autoBindByName);
-        AssignIfNeeded(ref ClockBut, AdePopupButtonSlot.SlotType.Close, "Click", force, autoBindByName);
-    }
-
-    void AssignIfNeeded(ref Button target, AdePopupButtonSlot.SlotType slotType, string fallbackName, bool force, bool allowNameFallback)
-    {
-        if (!force && target != null)
-        {
-            return;
-        }
-
-        target = FindButtonBySlot(slotType);
-        if (target == null && allowNameFallback)
-        {
-            target = AdeUIBindingUtility.FindInChildrenByName<Button>(transform, fallbackName);
-        }
-    }
-
-    Button FindButtonBySlot(AdePopupButtonSlot.SlotType slotType)
-    {
-        AdePopupButtonSlot[] slots = GetComponentsInChildren<AdePopupButtonSlot>(true);
-        foreach (AdePopupButtonSlot slot in slots)
-        {
-            if (slot != null && slot.Slot == slotType)
-            {
-                return slot.Button;
-            }
-        }
-
-        return null;
-    }
-
     /// <summary>
     /// 显示侧边栏
     /// </summary>
@@ -213,7 +145,6 @@ public class SidebarUI : MonoBehaviour
             rewardClaimCallback = onRewardClaimed;
         }
 
-        AutoBindControls(force: false);
         RefreshButtonState();
         gameObject.SetActive(true);
     }

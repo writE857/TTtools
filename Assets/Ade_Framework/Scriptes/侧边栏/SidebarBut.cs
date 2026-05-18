@@ -17,6 +17,10 @@ public class SidebarBut : MonoBehaviour
 
     private void Start()
     {
+#if !Ade_TT
+        gameObject.SetActive(false);
+        return;
+#else
         gameObject.GetComponent<Button>().onClick.AddListener(() => 
         {
             SidebarPlane.Instance.Show();
@@ -24,6 +28,7 @@ public class SidebarBut : MonoBehaviour
         gameObject.SetActive(false);
         LogManager.Log($"侧边栏：{AdeSDK.Instance.isSidebar}");
         if (AdeSDK.Instance.isSidebar) Show();
+#endif
     }
 
     /// <summary>
@@ -31,10 +36,14 @@ public class SidebarBut : MonoBehaviour
     /// </summary>
     public void Show()
     {
+#if !Ade_TT
+        return;
+#else
         LogManager.Log($"侧边栏：打开1");
         if (SidebarData.IsReWard) return;
         LogManager.Log($"侧边栏：打开2");
         gameObject.SetActive(true);
+#endif
     }
 
     /// <summary>

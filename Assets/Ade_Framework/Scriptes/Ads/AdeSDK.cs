@@ -147,6 +147,7 @@ namespace Ade_Framework
             WX.ReportGameStart();
 
             Wx_windowInfo = WX.GetWindowInfo();
+            SetupWeChatShare();
 
 #elif Ade_KS
             KS.ReportGameStart();
@@ -263,6 +264,88 @@ namespace Ade_Framework
         /// 系统信息
         /// </summary>
         public WindowInfo  Wx_windowInfo;
+
+        const string WeChatShareAppMessageMenu = "shareAppMessage";
+        const string WeChatShareTimelineMenu = "shareTimeline";
+
+        void SetupWeChatShare()
+        {
+            bool canShareTimeline = WX.CanIUse("onShareTimeline");
+            WX.ShowShareMenu(new ShowShareMenuOption
+            {
+                menus = canShareTimeline
+                    ? new[] { WeChatShareAppMessageMenu, WeChatShareTimelineMenu }
+                    : new[] { WeChatShareAppMessageMenu },
+                withShareTicket = true
+            });
+
+            WX.OnShareAppMessage(CreateWeChatShareParam(), resolve =>
+            {
+                resolve?.Invoke(CreateWeChatShareParam());
+            });
+
+            if (canShareTimeline)
+            {
+                WX.OnShareTimeline(resolve =>
+                {
+                    resolve?.Invoke(CreateWeChatShareTimelineParam());
+                });
+            }
+        }
+
+        ShareAppMessageOption CreateWeChatShareOption()
+        {
+            var option = new ShareAppMessageOption();
+            ApplyWeChatShareImage(GetWeChatShareId(), value => option.imageUrl = value, value => option.imageUrlId = value);
+            return option;
+        }
+
+        WXShareAppMessageParam CreateWeChatShareParam()
+        {
+            var param = new WXShareAppMessageParam();
+            ApplyWeChatShareImage(GetWeChatShareId(), value => param.imageUrl = value, value => param.imageUrlId = value);
+            return param;
+        }
+
+        OnShareTimelineListenerResult CreateWeChatShareTimelineParam()
+        {
+            var param = new OnShareTimelineListenerResult();
+            ApplyWeChatShareImage(
+                GetWeChatShareId(),
+                value =>
+                {
+                    param.imageUrl = value;
+                    param.imagePreviewUrl = value;
+                },
+                value =>
+                {
+                    param.imageUrlId = value;
+                    param.imagePreviewUrlId = value;
+                });
+            return param;
+        }
+
+        void ApplyWeChatShareImage(string shareValue, Action<string> setImageUrl, Action<string> setImageUrlId)
+        {
+            if (string.IsNullOrEmpty(shareValue))
+            {
+                return;
+            }
+
+            if (shareValue.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                shareValue.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                setImageUrl?.Invoke(shareValue);
+                return;
+            }
+
+            setImageUrlId?.Invoke(shareValue);
+        }
+
+        string GetWeChatShareId()
+        {
+            return _AdeDataInfo == null ? string.Empty : (_AdeDataInfo.ShareId ?? string.Empty).Trim();
+        }
 #endif
         #endregion
 
@@ -515,9 +598,8 @@ namespace Ade_Framework
             });
 
 #elif Ade_WX
-            ShareAppMessageOption samo = new ShareAppMessageOption();
-            samo.imageUrlId = _AdeDataInfo.ShareId;
-            WX.ShareAppMessage(new ShareAppMessageOption());
+            Debug.Log("微信分享图：" + GetWeChatShareId());
+            WX.ShareAppMessage(CreateWeChatShareOption());
 #elif Ade_KS
             KS.ShareAppMessage(new ShareAppMessageOption());
 #endif
@@ -1138,59 +1220,152 @@ namespace Ade_Framework
 
 
         #region 添加桌面
-#if Ade_BiliBili
-    /// <summary>
-    /// 添加桌面快捷方式
-    /// </summary>
-    public void AddShortcut()
-    {
-        LogManager.Log("Bl_AddShortcut");
-        var option = new AddShortcutOption()
+        /// <summary>
+        /// 添加桌面快捷方式
+        /// </summary>
+        public void AddShortcut(Action successAction = null, Action failAction = null)
         {
-            success = (res) =>
+#if UNITY_EDITOR || Ade_Debug
+            successAction?.Invoke();
+#elif Ade_TT
+            LogManager.Log("TT_AddShortcut");
+            TT.AddShortcut((isSuccess) =>
             {
-                LogManager.Log("Bl_AddShortcut success");
-                LogManager.Log(res.errMsg);
-            },
-            fail = (res) =>
+                if (isSuccess)
+                {
+                    LogManager.Log("TT_AddShortcut success");
+                    successAction?.Invoke();
+                    return;
+                }
+
+                LogManager.Log("TT_AddShortcut fail");
+                failAction?.Invoke();
+            }, true);
+#elif Ade_KS
+            LogManager.Log("KS_AddShortcut");
+            var option = new AddShortcutOption()
             {
-                LogManager.Log("Bl_AddShortcut fail");
-                LogManager.Log(res.errMsg);
-            },
-            complete = (res) =>
+                success = (res) =>
+                {
+                    LogManager.Log("KS_AddShortcut success");
+                    successAction?.Invoke();
+                },
+                fail = (res) =>
+                {
+                    LogManager.Log("KS_AddShortcut fail");
+                    failAction?.Invoke();
+                },
+                complete = (res) =>
+                {
+                    LogManager.Log("KS_AddShortcut complete");
+                }
+            };
+            KS.AddShortcut(option);
+#elif Ade_BiliBili
+            LogManager.Log("Bl_AddShortcut");
+            var option = new AddShortcutOption()
             {
-                LogManager.Log("Bl_AddShortcut complete");
-                LogManager.Log(res.errMsg);
-            }
-        };
-        WX.AddShortcut(option);
-    }
-    
-    /// <summary>
-    /// 检查是否已添加桌面快捷方式
-    /// </summary>
-    public void CheckShortcut(Action<bool> ShortcutAction)
-    {
-        LogManager.Log("Bl_CheckShortcut");
-        var option = new CheckShortcutOption()
-        {
-            success = (res) =>
+                success = (res) =>
+                {
+                    LogManager.Log("Bl_AddShortcut success");
+                    LogManager.Log(res.errMsg);
+                    successAction?.Invoke();
+                },
+                fail = (res) =>
+                {
+                    LogManager.Log("Bl_AddShortcut fail");
+                    LogManager.Log(res.errMsg);
+                    failAction?.Invoke();
+                },
+                complete = (res) =>
+                {
+                    LogManager.Log("Bl_AddShortcut complete");
+                    LogManager.Log(res.errMsg);
+                }
+            };
+            WX.AddShortcut(option);
+#elif Ade_WX
+            LogManager.Log("WX_AddShortcut");
+            var option = new AddShortcutOption()
             {
-                ShortcutAction?.Invoke(true);
-            },
-            fail = (res) =>
-            {
-                ShortcutAction?.Invoke(false);
-            },
-            complete = (res) =>
-            {
-                LogManager.Log("Bl_CheckShortcut complete");
-                LogManager.Log(res.errMsg);
-            }
-        };
-        WX.CheckShortcut(option);
-    }
+                success = (res) =>
+                {
+                    LogManager.Log("WX_AddShortcut success");
+                    LogManager.Log(res.errMsg);
+                    successAction?.Invoke();
+                },
+                fail = (res) =>
+                {
+                    LogManager.Log("WX_AddShortcut fail");
+                    LogManager.Log(res.errMsg);
+                    failAction?.Invoke();
+                },
+                complete = (res) =>
+                {
+                    LogManager.Log("WX_AddShortcut complete");
+                    LogManager.Log(res.errMsg);
+                }
+            };
+            WX.AddShortcut(option);
+#else
+            failAction?.Invoke();
 #endif
+        }
+
+        /// <summary>
+        /// 检查是否已添加桌面快捷方式
+        /// </summary>
+        public void CheckShortcut(Action<bool> shortcutAction)
+        {
+#if UNITY_EDITOR || Ade_Debug
+            shortcutAction?.Invoke(false);
+#elif Ade_TT
+            LogManager.Log("TT_CheckShortcut");
+            TT.CheckShortcut((isAdded) =>
+            {
+                shortcutAction?.Invoke(isAdded);
+            });
+#elif Ade_KS
+            LogManager.Log("KS_CheckShortcut");
+            var option = new CheckShortcutOption()
+            {
+                success = (res) =>
+                {
+                    shortcutAction?.Invoke(res.installed);
+                },
+                fail = (res) =>
+                {
+                    shortcutAction?.Invoke(false);
+                },
+                complete = (res) =>
+                {
+                    LogManager.Log("KS_CheckShortcut complete");
+                }
+            };
+            KS.CheckShortcut(option);
+#elif Ade_BiliBili
+            LogManager.Log("Bl_CheckShortcut");
+            var option = new CheckShortcutOption()
+            {
+                success = (res) =>
+                {
+                    shortcutAction?.Invoke(true);
+                },
+                fail = (res) =>
+                {
+                    shortcutAction?.Invoke(false);
+                },
+                complete = (res) =>
+                {
+                    LogManager.Log("Bl_CheckShortcut complete");
+                    LogManager.Log(res.errMsg);
+                }
+            };
+            WX.CheckShortcut(option);
+#else
+            shortcutAction?.Invoke(false);
+#endif
+        }
         #endregion
     }
 

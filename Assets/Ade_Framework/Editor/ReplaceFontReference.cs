@@ -12,8 +12,7 @@ public class ReplaceFontReference : EditorWindow
     private const string Title = "字体引用替换";
     private static readonly HashSet<string> SupportedFontTypeNames = new HashSet<string>
     {
-        typeof(Font).FullName,
-        "TMPro.TMP_FontAsset"
+        typeof(Font).FullName
     };
 
     private static readonly HashSet<string> SearchExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -78,7 +77,7 @@ public class ReplaceFontReference : EditorWindow
 
         if (!IsSupportedFont(targetFont) || !IsSupportedFont(replaceFont))
         {
-            errMsg = "仅支持 UnityEngine.Font 或 TMP_FontAsset。";
+            errMsg = "仅支持 UnityEngine.Font。";
             return false;
         }
 
