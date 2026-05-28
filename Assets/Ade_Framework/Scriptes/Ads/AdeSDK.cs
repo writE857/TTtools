@@ -29,7 +29,6 @@ namespace Ade_Framework
 {
     public class AdeSDK : SingleMono<AdeSDK>
     {
-
 #if UNITY_EDITOR
 #elif Ade_TT
 #elif Ade_WX
@@ -267,6 +266,15 @@ namespace Ade_Framework
 
         const string WeChatShareAppMessageMenu = "shareAppMessage";
         const string WeChatShareTimelineMenu = "shareTimeline";
+
+        public bool IsSubscribeAvailable
+        {
+#if UNITY_EDITOR || Ade_Debug
+            get => true;
+#else
+            get => WX.CanIUse("requestSubscribeMessage");
+#endif
+        }
 
         void SetupWeChatShare()
         {
@@ -788,22 +796,73 @@ namespace Ade_Framework
         /// 拉起订阅
         /// </summary>
         /// <param name="SuccessAction">成功回调</param>
-        public void OnRequestSubscribeMessage(Action SuccessAction) 
+        public void OnRequestSubscribeMessage(Action SuccessAction)
+        {
+            OnRequestSubscribeMessage(SuccessAction, null);
+        }
+
+        public void OnRequestSubscribeMessage(Action SuccessAction, Action<string> FailAction)
         {
             LogManager.Log("拉起订阅");
-#if Ade_Debug
+            List<string> subscribeTmplIds = _AdeDataInfo == null || _AdeDataInfo.SubscribeTmplIds == null
+                ? new List<string>()
+                : _AdeDataInfo.SubscribeTmplIds
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .Select(id => id.Trim())
+                    .Where(id => id.Length > 0)
+                    .Take(3)
+                    .ToList();
+
+            if (subscribeTmplIds.Count == 0)
+            {
+                LogManager.Log("订阅模板ID未配置");
+                FailAction?.Invoke("订阅模板ID未配置");
+                return;
+            }
+
+            LogManager.Log("订阅模板ID：" + string.Join(",", subscribeTmplIds));
+
+#if UNITY_EDITOR || Ade_Debug
             SuccessAction?.Invoke();
-#elif UNITY_EDITOR && !Ade_TT && !Ade_WX
 #elif Ade_TT
-            TT.RequestSubscribeMessage(_AdeDataInfo.SubscribeTmplIds, (msg) => 
+            TT.RequestSubscribeMessage(subscribeTmplIds, (msg) =>
             {
                 SuccessAction?.Invoke();
             });
 #elif Ade_WX
-          
-            RequestSubscribeMessageOption request = new RequestSubscribeMessageOption();
-            request.tmplIds = _AdeDataInfo.SubscribeTmplIds.ToArray();
+            RequestSubscribeMessageOption request = new RequestSubscribeMessageOption
+            {
+                tmplIds = subscribeTmplIds.ToArray(),
+                success = (res) =>
+                {
+                    LogManager.Log("WX_RequestSubscribeMessage success: " + res.errMsg);
+                    bool hasAccepted = subscribeTmplIds.Any(id =>
+                        res.TryGetValue(id, out string state) &&
+                        string.Equals(state, "accept", StringComparison.OrdinalIgnoreCase));
+
+                    if (hasAccepted)
+                    {
+                        SuccessAction?.Invoke();
+                    }
+                    else
+                    {
+                        LogManager.Log("WX_RequestSubscribeMessage not accepted");
+                        FailAction?.Invoke("用户未接受订阅");
+                    }
+                },
+                fail = (res) =>
+                {
+                    LogManager.Log("WX_RequestSubscribeMessage fail: " + res.errCode + " " + res.errMsg);
+                    FailAction?.Invoke(res.errCode + " " + res.errMsg);
+                },
+                complete = (res) =>
+                {
+                    LogManager.Log("WX_RequestSubscribeMessage complete: " + res.errMsg);
+                }
+            };
             WX.RequestSubscribeMessage(request);
+#else
+            FailAction?.Invoke("当前平台不支持订阅");
 #endif
         }
         #endregion
@@ -1286,27 +1345,8 @@ namespace Ade_Framework
             WX.AddShortcut(option);
 #elif Ade_WX
             LogManager.Log("WX_AddShortcut");
-            var option = new AddShortcutOption()
-            {
-                success = (res) =>
-                {
-                    LogManager.Log("WX_AddShortcut success");
-                    LogManager.Log(res.errMsg);
-                    successAction?.Invoke();
-                },
-                fail = (res) =>
-                {
-                    LogManager.Log("WX_AddShortcut fail");
-                    LogManager.Log(res.errMsg);
-                    failAction?.Invoke();
-                },
-                complete = (res) =>
-                {
-                    LogManager.Log("WX_AddShortcut complete");
-                    LogManager.Log(res.errMsg);
-                }
-            };
-            WX.AddShortcut(option);
+            LogManager.Log("WX_AddShortcut unsupported");
+            failAction?.Invoke();
 #else
             failAction?.Invoke();
 #endif

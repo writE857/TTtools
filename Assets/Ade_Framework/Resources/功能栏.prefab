@@ -373,7 +373,7 @@ MonoBehaviour:
   m_FontData:
     m_Font: {fileID: 12800000, guid: d8342e62a6e31f343b4ab481b32d0d9c, type: 3}
     m_FontSize: 15
-    m_FontStyle: 0
+    m_FontStyle: 1
     m_BestFit: 0
     m_MinSize: 1
     m_MaxSize: 40
@@ -676,10 +676,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 91cd344bc90cae34abf94daa1e88d1f0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  Position:
-    customPosition: 0
-    top: 0
-    left: 0
 --- !u!1 &6407535872275933818
 GameObject:
   m_ObjectHideFlags: 0

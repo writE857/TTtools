@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0f3f8a9b0d8a3344ba17e74aa04dd3fd, type: 3}
   m_Name: AdeDataInfo
   m_EditorClassIdentifier: 
-  ShareId: 
+  ShareId: https://mmocgame.qpic.cn/wechatgame/sn6MdibticRgWasiapibrjEYNTxwOBpZqtDxevS9AbKUaialoAFDCyq5naGBicNqicGz42a/0
   SubscribeTmplIds: []
   FeedContentIDs: []
   FeedRepeatContentID: 
