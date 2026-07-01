@@ -13,17 +13,15 @@ public class FeedBut : MonoBehaviour
     }
     private void Start()
     {
-        if (AdeSDK.Instance._AdeDataInfo == null ||
-            AdeSDK.Instance._AdeDataInfo.FeedContentIDs == null ||
-            AdeSDK.Instance._AdeDataInfo.FeedContentIDs.Count == 0)
+#if !Ade_TT
+        Close();
+#else
+        if (AdeSDK.Instance._AdeDataInfo == null || !AdeSDK.Instance.HasAnyFeedContentId())
         {
             Close();
             return;
         }
 
-#if !Ade_TT
-        Close();
-#else
         Close();
 
         gameObject.GetComponent<Button>().onClick.AddListener(() =>

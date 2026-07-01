@@ -4,10 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEditor;
-using UnityEditor.SceneManagement;
 using UnityEditorInternal;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 public class AdeConsoleWindow : EditorWindow
@@ -19,13 +17,10 @@ public class AdeConsoleWindow : EditorWindow
     const string DebugAdScriptPath = "Assets/Ade_Framework/Scriptes/Debug/DebugAd.cs";
     const string ResourceFolderPath = "Assets/Ade_Framework/Resources/ScriptableObject";
     const string FeedLaunchModeEditorPrefsKey = "Ade.Editor.FeedLaunchMode";
-    const string LivePathSceneTextEditorPrefsKey = "Ade.Editor.LivePathSceneTexts";
-    const string BgdtPackagePath = @"E:\UnityTools\Editor\TTtool\com.bytedance.bgdt-cp-3.0.271.unitypackage";
-    const string MinigamePackagePath = @"E:\UnityTools\Editor\TTtool\minigame.202601131148.unitypackage";
+    const string SidebarUIPrefabPath = "Assets/Ade_Framework/Resources/SidebarUI.prefab";
     const string NoAdsSymbol = "ADE_NO_ADS";
     const string DebugSymbol = "Ade_Debug";
     const string ProjectSettingsAssetPath = "ProjectSettings/ProjectSettings.asset";
-    const string LivePathPrefabPath = "Assets/Ade_Framework/Resources/直播路径.prefab";
     const float ListSelectHandleWidth = 16f;
     const float ListSelectContentOffset = 18f;
 
@@ -54,18 +49,15 @@ public class AdeConsoleWindow : EditorWindow
     bool customSymbolsDirty;
     bool launchModeDirty;
     bool rewardConfigDirty;
-    bool livePathSceneTextDirty;
     int selectedPlatformPresetIndex;
     FeedLaunchMode selectedFeedLaunchMode;
     FeedLaunchMode cachedFeedLaunchMode;
     string rewardShareIdDraft = string.Empty;
-    string rewardFeedRepeatContentIdDraft = string.Empty;
-    [SerializeField] GameObject livePathPrefabOverride;
-    [SerializeField] List<LivePathSceneTextDraft> livePathSceneTextDrafts = new();
     readonly AdItemDraft interstitialAdDraft = new();
     readonly AdItemDraft bannerAdDraft = new();
     readonly List<string> subscribeTemplateDrafts = new();
-    readonly List<string> feedContentDrafts = new();
+    readonly List<string> feedRepeatContentDrafts = new();
+    readonly List<string> feedAcquisitionContentDrafts = new();
     readonly List<AdItemDraft> rewardAdDrafts = new();
     readonly List<GridAdDraft> gridAdDrafts = new();
     readonly MoreGamesDraft moreGamesDraft = new();
@@ -73,18 +65,18 @@ public class AdeConsoleWindow : EditorWindow
     readonly List<string> editableCustomSymbols = new();
     readonly ListSelectionState customSymbolSelection = new();
     readonly ListSelectionState subscribeTemplateSelection = new();
-    readonly ListSelectionState feedContentSelection = new();
+    readonly ListSelectionState feedRepeatContentSelection = new();
+    readonly ListSelectionState feedAcquisitionContentSelection = new();
     readonly ListSelectionState rewardAdSelection = new();
     readonly ListSelectionState gridAdSelection = new();
     readonly ListSelectionState moreGamesQuerySelection = new();
-    readonly ListSelectionState livePathSceneTextSelection = new();
     ReorderableList customSymbolList;
     ReorderableList subscribeTemplateList;
-    ReorderableList feedContentList;
+    ReorderableList feedRepeatContentList;
+    ReorderableList feedAcquisitionContentList;
     ReorderableList rewardAdList;
     ReorderableList gridAdList;
     ReorderableList moreGamesQueryList;
-    ReorderableList livePathSceneTextList;
     ListSelectionState activeListSelection;
     ReorderableList activeReorderableList;
     GUIStyle sectionTitleStyle;
@@ -93,6 +85,8 @@ public class AdeConsoleWindow : EditorWindow
     GUIStyle pathLabelStyle;
     GUIStyle templateNameSelectedStyle;
     GUIStyle templateNameStyle;
+    GameObject sidebarPrefabRoot;
+    bool sidebarPrefabDirty;
 
     [MenuItem("Ade_Tools/Ade 控制台")]
     public static void OpenWindow()
@@ -104,24 +98,33 @@ public class AdeConsoleWindow : EditorWindow
     {
         minSize = new Vector2(720f, 520f);
         LoadFeedLaunchMode();
-        LoadLivePathSceneTextDrafts();
         EnsureEditorStateInitialized();
+    }
+
+    void OnDisable()
+    {
+        if (sidebarPrefabDirty)
+        {
+            SaveSidebarPrefabContents();
+        }
+
+        UnloadSidebarPrefabContents();
     }
 
     void EnsureEditorStateInitialized()
     {
-        if (customSymbolList != null && subscribeTemplateList != null && feedContentList != null && rewardAdList != null && gridAdList != null && moreGamesQueryList != null && livePathSceneTextList != null)
+        if (customSymbolList != null && subscribeTemplateList != null && feedRepeatContentList != null && feedAcquisitionContentList != null && rewardAdList != null && gridAdList != null && moreGamesQueryList != null)
         {
             return;
         }
 
         customSymbolList = CreateCustomSymbolListEditor();
         subscribeTemplateList = CreateStringListEditor(subscribeTemplateDrafts, "订阅模板", subscribeTemplateSelection, () => rewardConfigDirty = true);
-        feedContentList = CreateStringListEditor(feedContentDrafts, "推荐流内容", feedContentSelection, () => rewardConfigDirty = true);
+        feedRepeatContentList = CreateStringListEditor(feedRepeatContentDrafts, "复访流内容", feedRepeatContentSelection, () => rewardConfigDirty = true);
+        feedAcquisitionContentList = CreateStringListEditor(feedAcquisitionContentDrafts, "获客流内容", feedAcquisitionContentSelection, () => rewardConfigDirty = true);
         rewardAdList = CreateAdItemListEditor(rewardAdDrafts, "激励参数", rewardAdSelection);
         gridAdList = CreateGridAdListEditor(gridAdDrafts, "格子广告参数", gridAdSelection);
         moreGamesQueryList = CreateMoreGamesQueryListEditor(moreGamesQueryDrafts, "更多游戏 Query", moreGamesQuerySelection);
-        livePathSceneTextList = CreateLivePathSceneTextListEditor();
         LoadRewardConfigDrafts();
     }
 
@@ -214,7 +217,7 @@ public class AdeConsoleWindow : EditorWindow
             return;
         }
 
-        bool hasChanges = customSymbolsDirty || launchModeDirty || rewardConfigDirty || livePathSceneTextDirty;
+        bool hasChanges = customSymbolsDirty || launchModeDirty || rewardConfigDirty || sidebarPrefabDirty;
         if (customSymbolsDirty)
         {
             SaveCustomSymbols(group);
@@ -230,9 +233,9 @@ public class AdeConsoleWindow : EditorWindow
             SaveRewardConfigDrafts();
         }
 
-        if (livePathSceneTextDirty)
+        if (sidebarPrefabDirty)
         {
-            SaveLivePathSceneTextDrafts();
+            SaveSidebarPrefabContents();
         }
 
         if (hasChanges)
@@ -262,9 +265,9 @@ public class AdeConsoleWindow : EditorWindow
             reverted = true;
         }
 
-        if (livePathSceneTextDirty)
+        if (sidebarPrefabDirty)
         {
-            LoadLivePathSceneTextDrafts();
+            ReloadSidebarPrefabContents();
             reverted = true;
         }
 
@@ -283,17 +286,12 @@ public class AdeConsoleWindow : EditorWindow
         {
             DrawQuadrantColumn(() => DrawDefineSection(group, symbols));
             GUILayout.Space(10f);
-            DrawQuadrantColumn(DrawPackageCleanupSection);
+            DrawQuadrantColumn(DrawWebGLTemplateSection);
         }
 
         GUILayout.Space(10f);
 
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            DrawQuadrantColumn(() => DrawRewardConfigSection(group, symbols));
-            GUILayout.Space(10f);
-            DrawQuadrantColumn(DrawWebGLTemplateSection);
-        }
+        DrawRewardConfigSection(group, symbols);
     }
 
     void DrawQuadrantColumn(Action drawContent)
@@ -475,79 +473,47 @@ public class AdeConsoleWindow : EditorWindow
         }
     }
 
-    void DrawPackageCleanupSection()
-    {
-        BeginSectionCard("包清理", "按包文件名识别清理目标");
-        EditorGUILayout.LabelField("ByteGame 相关包会直接清理整个 Assets/Plugins/ByteGame。", sectionNoteStyle);
-        EditorGUILayout.Space(4f);
-
-        livePathPrefabOverride = (GameObject)EditorGUILayout.ObjectField(
-            "直播路径预制体",
-            ResolveLivePathPrefab(),
-            typeof(GameObject),
-            false);
-
-        EditorGUILayout.Space(4f);
-        SyncLivePathSceneTextDraftsWithBuildSettings();
-        livePathSceneTextList.DoLayoutList();
-
-        EditorGUILayout.Space(4f);
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            GUI.enabled = livePathSceneTextDirty && !EditorApplication.isCompiling && !EditorApplication.isUpdating;
-            if (GUILayout.Button("应用文字", GUILayout.Height(24)))
-            {
-                SaveLivePathSceneTextDrafts();
-            }
-
-            GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating;
-            if (GUILayout.Button("添加/更新所有场景直播路径", GUILayout.Height(24)))
-            {
-                AddLivePathPrefabToAllScenes();
-            }
-            GUI.enabled = true;
-        }
-        if (GUILayout.Button("删除所有场景里的该预制体", GUILayout.Height(24)))
-        {
-            RemoveLivePathPrefabFromAllScenes();
-        }
-
-        EditorGUILayout.Space(6f);
-        DrawPackageCleanupButton(BgdtPackagePath);
-        DrawPackageCleanupButton(MinigamePackagePath);
-        EndSectionCard();
-    }
-
     void DrawRewardConfigSection(BuildTargetGroup group, List<string> symbols)
     {
         BeginSectionCard("激励参数", "AdeDataInfo 与激励广告配置");
 
         UnityEngine.Object adeDataInfo = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdeDataInfoPath);
-        DrawAssetBlock(
-            "AdeDataInfo",
-            AdeDataInfoPath,
-            adeDataInfo,
-            FindOtherAssetPath("AdeDataInfo", AdeDataInfoPath),
-            CreateAdeDataInfoAsset);
-
-        if (adeDataInfo != null)
-        {
-            DrawRewardAdeDataInfoEditor();
-        }
-
-        EditorGUILayout.Space(4f);
-
         UnityEngine.Object adsData = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdsDataPath);
-        DrawAssetBlock(
-            "AdsData",
-            AdsDataPath,
-            adsData,
-            FindOtherAssetPath("AdsData", AdsDataPath),
-            CreateAdsDataAsset);
 
-        if (adsData != null)
+        float columnWidth = Mathf.Max(320f, (position.width - 54f) * 0.5f);
+        using (new EditorGUILayout.HorizontalScope())
         {
-            DrawRewardOnlyEditor();
+            using (new EditorGUILayout.VerticalScope(GUILayout.Width(columnWidth)))
+            {
+                DrawAssetBlock(
+                    "AdsData",
+                    AdsDataPath,
+                    adsData,
+                    FindOtherAssetPath("AdsData", AdsDataPath),
+                    CreateAdsDataAsset);
+
+                if (adsData != null)
+                {
+                    DrawRewardOnlyEditor();
+                }
+            }
+
+            GUILayout.Space(8f);
+
+            using (new EditorGUILayout.VerticalScope(GUILayout.Width(columnWidth)))
+            {
+                DrawAssetBlock(
+                    "AdeDataInfo",
+                    AdeDataInfoPath,
+                    adeDataInfo,
+                    FindOtherAssetPath("AdeDataInfo", AdeDataInfoPath),
+                    CreateAdeDataInfoAsset);
+
+                if (adeDataInfo != null)
+                {
+                    DrawRewardAdeDataInfoEditor();
+                }
+            }
         }
 
         EditorGUILayout.Space(6f);
@@ -573,8 +539,8 @@ public class AdeConsoleWindow : EditorWindow
             subscribeTemplateList.DoLayoutList();
 
             EditorGUILayout.Space(2f);
-            DrawCompactContentIdField("复访流内容", rewardFeedRepeatContentIdDraft, value => rewardFeedRepeatContentIdDraft = value, 68f);
-            feedContentList.DoLayoutList();
+            feedRepeatContentList.DoLayoutList();
+            feedAcquisitionContentList.DoLayoutList();
         }
     }
 
@@ -608,6 +574,7 @@ public class AdeConsoleWindow : EditorWindow
         string currentTemplate = GetCurrentWebGLTemplate();
         List<WebGLTemplateDraft> templates = GetAvailableWebGLTemplates(currentTemplate);
         DrawUnityStyleTemplateSelector(templates, currentTemplate);
+        DrawSidebarPrefabEditorSection();
         EndSectionCard();
     }
 
@@ -633,6 +600,258 @@ public class AdeConsoleWindow : EditorWindow
                 GUILayout.Space(4f);
             }
         }
+    }
+
+    void DrawSidebarPrefabEditorSection()
+    {
+        EditorGUILayout.Space(4f);
+
+        GameObject prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(SidebarUIPrefabPath);
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("SidebarUI.prefab", EditorStyles.miniBoldLabel);
+                GUILayout.FlexibleSpace();
+
+                GUI.enabled = sidebarPrefabDirty;
+                if (GUILayout.Button("保存  Ctrl+S", GUILayout.Width(92f)))
+                {
+                    SaveSidebarPrefabContents();
+                }
+                GUI.enabled = true;
+            }
+
+            if (prefabAsset == null)
+            {
+                EditorGUILayout.HelpBox("固定路径下未找到 SidebarUI.prefab。", MessageType.Warning);
+                return;
+            }
+
+            if (!EnsureSidebarPrefabContentsLoaded())
+            {
+                EditorGUILayout.HelpBox("SidebarUI.prefab 加载失败。", MessageType.Warning);
+                return;
+            }
+
+            DrawSidebarFixedImageSlot("mask/icon", "icon");
+            EditorGUILayout.Space(1f);
+            DrawSidebarAppNameSlot("AppName1", "AppName2");
+        }
+    }
+
+    bool EnsureSidebarPrefabContentsLoaded()
+    {
+        if (sidebarPrefabRoot != null)
+        {
+            return true;
+        }
+
+        try
+        {
+            sidebarPrefabRoot = PrefabUtility.LoadPrefabContents(SidebarUIPrefabPath);
+            sidebarPrefabDirty = false;
+            return sidebarPrefabRoot != null;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogException(exception);
+            return false;
+        }
+    }
+
+    void SaveSidebarPrefabContents()
+    {
+        if (sidebarPrefabRoot == null)
+        {
+            sidebarPrefabDirty = false;
+            return;
+        }
+
+        PrefabUtility.SaveAsPrefabAsset(sidebarPrefabRoot, SidebarUIPrefabPath);
+        sidebarPrefabDirty = false;
+        AssetDatabase.SaveAssets();
+        AssetDatabase.ImportAsset(SidebarUIPrefabPath);
+        Repaint();
+    }
+
+    void ReloadSidebarPrefabContents()
+    {
+        UnloadSidebarPrefabContents();
+        EnsureSidebarPrefabContentsLoaded();
+        Repaint();
+    }
+
+    void UnloadSidebarPrefabContents()
+    {
+        if (sidebarPrefabRoot != null)
+        {
+            PrefabUtility.UnloadPrefabContents(sidebarPrefabRoot);
+        }
+
+        sidebarPrefabRoot = null;
+        sidebarPrefabDirty = false;
+    }
+
+    GameObject FindSidebarObject(string objectName)
+    {
+        Transform transform = FindSidebarTransform(sidebarPrefabRoot != null ? sidebarPrefabRoot.transform : null, objectName);
+        return transform != null ? transform.gameObject : null;
+    }
+
+    Transform FindSidebarTransform(Transform current, string objectName)
+    {
+        if (current == null)
+        {
+            return null;
+        }
+
+        if (objectName.IndexOf('/') >= 0)
+        {
+            string[] segments = objectName.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            return FindSidebarTransformByPath(current, segments, 0);
+        }
+
+        if (string.Equals(current.name, objectName, StringComparison.Ordinal))
+        {
+            return current;
+        }
+
+        foreach (Transform child in current)
+        {
+            Transform found = FindSidebarTransform(child, objectName);
+            if (found != null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    Transform FindSidebarTransformByPath(Transform current, string[] segments, int index)
+    {
+        if (current == null)
+        {
+            return null;
+        }
+
+        if (index >= segments.Length)
+        {
+            return current;
+        }
+
+        string segment = segments[index];
+        foreach (Transform child in current)
+        {
+            if (!string.Equals(child.name, segment, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            Transform matched = FindSidebarTransformByPath(child, segments, index + 1);
+            if (matched != null)
+            {
+                return matched;
+            }
+        }
+
+        foreach (Transform child in current)
+        {
+            Transform matched = FindSidebarTransformByPath(child, segments, index);
+            if (matched != null)
+            {
+                return matched;
+            }
+        }
+
+        return null;
+    }
+
+    void DrawSidebarFixedImageSlot(string objectName, string label)
+    {
+        GameObject gameObject = FindSidebarObject(objectName);
+        if (gameObject == null)
+        {
+            EditorGUILayout.HelpBox($"{label} 节点未找到。", MessageType.Warning);
+            return;
+        }
+
+        Image image = gameObject.GetComponent<Image>();
+        if (image == null)
+        {
+            EditorGUILayout.HelpBox($"{label} 没有 Image 组件。", MessageType.Warning);
+            return;
+        }
+
+        Rect rowRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight);
+        Rect labelRect = new Rect(rowRect.x, rowRect.y, 42f, rowRect.height);
+        Rect fieldRect = new Rect(rowRect.x + 46f, rowRect.y, rowRect.width - 46f, rowRect.height);
+        GUI.Label(labelRect, label, EditorStyles.miniBoldLabel);
+        EditorGUI.BeginChangeCheck();
+        Sprite sprite = (Sprite)EditorGUI.ObjectField(fieldRect, image.sprite, typeof(Sprite), false);
+        if (EditorGUI.EndChangeCheck())
+        {
+            Undo.RecordObject(image, "编辑 SidebarUI 图片");
+            image.sprite = sprite;
+            MarkSidebarPrefabDirty(image);
+        }
+    }
+
+    void DrawSidebarAppNameSlot(string clickObjectName, string appObjectName)
+    {
+        GameObject clickObject = FindSidebarObject(clickObjectName);
+        GameObject appObject = FindSidebarObject(appObjectName);
+        if (clickObject == null || appObject == null)
+        {
+            EditorGUILayout.HelpBox("AppName 节点未找到。", MessageType.Warning);
+            return;
+        }
+
+        Text clickText = clickObject.GetComponent<Text>();
+        Text appText = appObject.GetComponent<Text>();
+        if (clickText == null || appText == null)
+        {
+            EditorGUILayout.HelpBox("AppName 节点缺少 Text 组件。", MessageType.Warning);
+            return;
+        }
+
+        Rect rowRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight);
+        Rect labelRect = new Rect(rowRect.x, rowRect.y, 60f, rowRect.height);
+        Rect fieldRect = new Rect(rowRect.x + 64f, rowRect.y, rowRect.width - 64f, rowRect.height);
+        GUI.Label(labelRect, "appname", EditorStyles.miniBoldLabel);
+        EditorGUI.BeginChangeCheck();
+        string baseValue = string.IsNullOrEmpty(appText.text) ? StripClickPrefix(clickText.text) : appText.text;
+        string value = EditorGUI.TextField(fieldRect, baseValue);
+        if (EditorGUI.EndChangeCheck())
+        {
+            string clickValue = string.IsNullOrEmpty(value) ? value : $"点击{value}";
+            Undo.RecordObject(clickText, "编辑 SidebarUI 文本");
+            Undo.RecordObject(appText, "编辑 SidebarUI 文本");
+            clickText.text = clickValue;
+            appText.text = value;
+            MarkSidebarPrefabDirty(appText);
+        }
+    }
+
+    string StripClickPrefix(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.StartsWith("点击", StringComparison.Ordinal) ? value.Substring(2) : value;
+    }
+
+    void MarkSidebarPrefabDirty(UnityEngine.Object target)
+    {
+        if (target != null)
+        {
+            EditorUtility.SetDirty(target);
+        }
+
+        sidebarPrefabDirty = true;
     }
 
     void DrawUnityTemplateCard(WebGLTemplateDraft template, string currentTemplate)
@@ -743,72 +962,9 @@ public class AdeConsoleWindow : EditorWindow
         return templates;
     }
 
-    void DrawPackageCleanupButton(string packagePath)
-    {
-        string[] importedAssets = GetImportedAssetsByPackageFileName(packagePath);
-        string buttonLabel = GetCleanupButtonLabel(packagePath);
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating;
-            if (GUILayout.Button(buttonLabel, GUILayout.Height(24)))
-            {
-                DeleteImportedPackageAssets(packagePath, importedAssets);
-            }
-            GUI.enabled = true;
-
-            EditorGUILayout.LabelField(
-                AnyAssetExists(importedAssets) ? "已检测到可删除内容" : "当前工程里未检测到这些导入内容",
-                EditorStyles.miniLabel);
-        }
-    }
-
-    string[] GetImportedAssetsByPackageFileName(string packagePath)
-    {
-        string fileName = System.IO.Path.GetFileName(packagePath).ToLowerInvariant();
-        if (fileName.Contains("bgdt") || fileName.Contains("bytedance"))
-        {
-            return new[]
-            {
-                "Assets/Plugins/ByteGame",
-            };
-        }
-
-        if (fileName.Contains("minigame"))
-        {
-            return new[]
-            {
-                "Assets/WX-WASM-SDK-V2",
-                "Assets/WebGLTemplates/WXTemplate",
-                "Assets/WebGLTemplates/WXTemplate2020",
-                "Assets/WebGLTemplates/WXTemplate2022",
-                "Assets/WebGLTemplates/WXTemplate2022TJ",
-            };
-        }
-
-        return Array.Empty<string>();
-    }
-
-    string GetCleanupButtonLabel(string packagePath)
-    {
-        string fileName = System.IO.Path.GetFileName(packagePath).ToLowerInvariant();
-        if (fileName.Contains("bgdt") || fileName.Contains("bytedance"))
-        {
-            return "清理 ByteGame 文件夹";
-        }
-
-        if (fileName.Contains("minigame"))
-        {
-            return "清理 minigame 导入内容";
-        }
-
-        return $"清理 {System.IO.Path.GetFileNameWithoutExtension(packagePath)}";
-    }
-
     void DrawAdeDataInfoEditor(UnityEngine.Object adeDataInfo)
     {
-        EnsureListField(adeDataInfo, "SubscribeTmplIds");
-        EnsureListField(adeDataInfo, "FeedContentIDs");
+        EnsureAdeDataInfoFeedFields(adeDataInfo);
 
         SerializedObject serializedObject = new SerializedObject(adeDataInfo);
         serializedObject.Update();
@@ -819,8 +975,8 @@ public class AdeConsoleWindow : EditorWindow
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(serializedObject.FindProperty("ShareId"), new GUIContent("ShareId"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("SubscribeTmplIds"), new GUIContent("订阅模板"), true);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("FeedContentIDs"), new GUIContent("推荐流内容"), true);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("FeedRepeatContentID"), new GUIContent("复访流内容"), true);
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("FeedRepeatContentIDs"), new GUIContent("复访流内容"), true);
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("FeedAcquisitionContentIDs"), new GUIContent("获客流内容"), true);
             if (EditorGUI.EndChangeCheck())
             {
                 SaveSerializedChanges(serializedObject, adeDataInfo);
@@ -1279,50 +1435,6 @@ public class AdeConsoleWindow : EditorWindow
         return reorderableList;
     }
 
-    ReorderableList CreateLivePathSceneTextListEditor()
-    {
-        var reorderableList = new ReorderableList(livePathSceneTextDrafts, typeof(LivePathSceneTextDraft), false, true, false, false);
-        reorderableList.drawHeaderCallback = rect => EditorGUI.LabelField(rect, "场景文字");
-        reorderableList.drawElementBackgroundCallback = (rect, index, isActive, isFocused) =>
-        {
-            DrawSelectableRowBackground(rect, livePathSceneTextSelection.IsSelected(index));
-        };
-        reorderableList.drawElementCallback = (rect, index, isActive, isFocused) =>
-        {
-            if (index < 0 || index >= livePathSceneTextDrafts.Count)
-            {
-                return;
-            }
-
-            LivePathSceneTextDraft item = livePathSceneTextDrafts[index];
-            Rect selectionRect = GetSelectionRect(rect);
-            DrawSelectionHandle(selectionRect, livePathSceneTextSelection.IsSelected(index));
-            if (HandleSelectionClick(rect, selectionRect, index, livePathSceneTextSelection, reorderableList))
-            {
-                return;
-            }
-
-            Rect contentRect = GetListContentRect(rect);
-            contentRect.y += 1f;
-            contentRect.height = EditorGUIUtility.singleLineHeight;
-            float gap = 6f;
-            float sceneWidth = Mathf.Min(180f, Mathf.Max(96f, contentRect.width * 0.34f));
-            Rect sceneRect = new Rect(contentRect.x, contentRect.y, sceneWidth, contentRect.height);
-            Rect textRect = new Rect(sceneRect.xMax + gap, contentRect.y, contentRect.xMax - sceneRect.xMax - gap, contentRect.height);
-
-            EditorGUI.LabelField(sceneRect, new GUIContent(GetSceneDisplayName(item.ScenePath), item.ScenePath), EditorStyles.miniLabel);
-            string updatedText = EditorGUI.TextField(textRect, item.Text ?? string.Empty);
-            if (updatedText != item.Text)
-            {
-                item.Text = updatedText;
-                livePathSceneTextDirty = true;
-            }
-        };
-        reorderableList.elementHeight = EditorGUIUtility.singleLineHeight + 4f;
-        reorderableList.footerHeight = 0f;
-        return reorderableList;
-    }
-
     bool DrawCompactAdItemFields(Rect fieldRect, AdItemDraft item)
     {
         float gap = 6f;
@@ -1581,8 +1693,11 @@ public class AdeConsoleWindow : EditorWindow
         Type assetType = asset.GetType();
         if (assetType.Name == "AdeDataInfo")
         {
+            EnsureAdeDataInfoFeedFields(asset);
             NormalizeStringListField(asset, "SubscribeTmplIds");
             NormalizeStringListField(asset, "FeedContentIDs");
+            NormalizeStringListField(asset, "FeedRepeatContentIDs");
+            NormalizeStringListField(asset, "FeedAcquisitionContentIDs");
             return;
         }
 
@@ -2272,402 +2387,22 @@ public class AdeConsoleWindow : EditorWindow
         return candidates[0];
     }
 
-    string[] GetBuildScenePaths()
-    {
-        return EditorBuildSettings.scenes
-            .Select(item => item.path)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct()
-            .ToArray();
-    }
-
-    void LoadLivePathSceneTextDrafts()
-    {
-        livePathSceneTextDrafts ??= new List<LivePathSceneTextDraft>();
-        livePathSceneTextDrafts.Clear();
-
-        string json = EditorPrefs.GetString(LivePathSceneTextEditorPrefsKey, string.Empty);
-        if (!string.IsNullOrWhiteSpace(json))
-        {
-            try
-            {
-                LivePathSceneTextStore store = JsonUtility.FromJson<LivePathSceneTextStore>(json);
-                if (store?.Items != null)
-                {
-                    livePathSceneTextDrafts.AddRange(store.Items.Where(item => item != null));
-                }
-            }
-            catch (ArgumentException)
-            {
-                EditorPrefs.DeleteKey(LivePathSceneTextEditorPrefsKey);
-            }
-        }
-
-        SyncLivePathSceneTextDraftsWithBuildSettings();
-        livePathSceneTextDirty = false;
-    }
-
-    void SaveLivePathSceneTextDrafts()
-    {
-        LivePathSceneTextStore store = new LivePathSceneTextStore
-        {
-            Items = livePathSceneTextDrafts
-                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.ScenePath))
-                .Select(item => new LivePathSceneTextDraft
-                {
-                    ScenePath = item.ScenePath,
-                    Text = item.Text ?? string.Empty
-                })
-                .ToList()
-        };
-
-        EditorPrefs.SetString(LivePathSceneTextEditorPrefsKey, JsonUtility.ToJson(store));
-        livePathSceneTextDirty = false;
-    }
-
-    void SyncLivePathSceneTextDraftsWithBuildSettings()
-    {
-        livePathSceneTextDrafts ??= new List<LivePathSceneTextDraft>();
-
-        string[] scenePaths = GetBuildScenePaths();
-        Dictionary<string, LivePathSceneTextDraft> existingDrafts = livePathSceneTextDrafts
-            .Where(item => item != null && !string.IsNullOrWhiteSpace(item.ScenePath))
-            .GroupBy(item => item.ScenePath, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-
-        bool changed = livePathSceneTextDrafts.Count != scenePaths.Length;
-        List<LivePathSceneTextDraft> syncedDrafts = new List<LivePathSceneTextDraft>(scenePaths.Length);
-        string defaultText = GetLivePathDefaultText();
-
-        foreach (string scenePath in scenePaths)
-        {
-            if (existingDrafts.TryGetValue(scenePath, out LivePathSceneTextDraft draft))
-            {
-                syncedDrafts.Add(draft);
-            }
-            else
-            {
-                syncedDrafts.Add(new LivePathSceneTextDraft
-                {
-                    ScenePath = scenePath,
-                    Text = defaultText
-                });
-                changed = true;
-            }
-        }
-
-        if (!changed)
-        {
-            for (int i = 0; i < syncedDrafts.Count; i++)
-            {
-                if (!string.Equals(livePathSceneTextDrafts[i].ScenePath, syncedDrafts[i].ScenePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    changed = true;
-                    break;
-                }
-            }
-        }
-
-        if (!changed)
-        {
-            return;
-        }
-
-        livePathSceneTextDrafts.Clear();
-        livePathSceneTextDrafts.AddRange(syncedDrafts);
-        livePathSceneTextSelection.Clear();
-        if (livePathSceneTextList != null)
-        {
-            livePathSceneTextList.index = livePathSceneTextDrafts.Count > 0 ? 0 : -1;
-        }
-        SaveLivePathSceneTextDrafts();
-    }
-
-    string GetLivePathSceneText(string scenePath)
-    {
-        LivePathSceneTextDraft draft = livePathSceneTextDrafts
-            .FirstOrDefault(item => item != null && string.Equals(item.ScenePath, scenePath, StringComparison.OrdinalIgnoreCase));
-        return draft != null ? draft.Text ?? string.Empty : GetLivePathDefaultText();
-    }
-
-    string GetLivePathDefaultText()
-    {
-        GameObject prefab = ResolveLivePathPrefab();
-        if (prefab == null)
-        {
-            return "首页=>开始游戏";
-        }
-
-        Text text = prefab.GetComponentInChildren<Text>(true);
-        return text != null ? text.text : "首页=>开始游戏";
-    }
-
-    string GetSceneDisplayName(string scenePath)
-    {
-        if (string.IsNullOrWhiteSpace(scenePath))
-        {
-            return "未命名场景";
-        }
-
-        string fileName = System.IO.Path.GetFileNameWithoutExtension(scenePath);
-        return string.IsNullOrWhiteSpace(fileName) ? scenePath : fileName;
-    }
-
-    void AddLivePathPrefabToAllScenes()
-    {
-        GameObject prefab = ResolveLivePathPrefab();
-        if (prefab == null)
-        {
-            EditorUtility.DisplayDialog("未找到 Prefab", $"未找到可用预制体。\n默认路径：\n{LivePathPrefabPath}", "确定");
-            return;
-        }
-
-        string prefabPath = AssetDatabase.GetAssetPath(prefab);
-        SyncLivePathSceneTextDraftsWithBuildSettings();
-        if (livePathSceneTextDirty)
-        {
-            SaveLivePathSceneTextDrafts();
-        }
-        string[] scenePaths = GetBuildScenePaths();
-
-        if (scenePaths.Length == 0)
-        {
-            EditorUtility.DisplayDialog("未找到场景", "Build Settings 中没有可处理的场景。", "确定");
-            return;
-        }
-
-        bool confirmed = EditorUtility.DisplayDialog(
-            "批量添加直播路径",
-            $"将检查并处理 Build Settings 中的 {scenePaths.Length} 个场景。\n已存在该 Prefab 的场景会更新场景文字。",
-            "开始",
-            "取消");
-
-        if (!confirmed)
-        {
-            return;
-        }
-
-        SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
-        int addedCount = 0;
-        int updatedCount = 0;
-        int skippedCount = 0;
-
-        try
-        {
-            foreach (string scenePath in scenePaths)
-            {
-                Scene scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
-                string sceneText = GetLivePathSceneText(scenePath);
-                List<GameObject> existingInstances = FindPrefabInstancesInScene(scene, prefabPath);
-                if (existingInstances.Count > 0)
-                {
-                    if (ApplyLivePathTextToInstances(existingInstances, sceneText))
-                    {
-                        EditorSceneManager.MarkSceneDirty(scene);
-                        EditorSceneManager.SaveScene(scene);
-                        updatedCount++;
-                    }
-                    else
-                    {
-                        skippedCount++;
-                    }
-                    continue;
-                }
-
-                GameObject instance = PrefabUtility.InstantiatePrefab(prefab, scene) as GameObject;
-                if (instance != null)
-                {
-                    ApplyLivePathText(instance, sceneText);
-                }
-                EditorSceneManager.MarkSceneDirty(scene);
-                EditorSceneManager.SaveScene(scene);
-                addedCount++;
-            }
-        }
-        finally
-        {
-            if (originalSetup != null && originalSetup.Length > 0)
-            {
-                EditorSceneManager.RestoreSceneManagerSetup(originalSetup);
-            }
-        }
-
-        EditorUtility.DisplayDialog(
-            "处理完成",
-            $"已新增 {addedCount} 个场景，更新 {updatedCount} 个已有场景，跳过 {skippedCount} 个无需更新场景。",
-            "确定");
-    }
-
-    void RemoveLivePathPrefabFromAllScenes()
-    {
-        GameObject prefab = ResolveLivePathPrefab();
-        if (prefab == null)
-        {
-            EditorUtility.DisplayDialog("未找到 Prefab", $"未找到可用预制体。\n默认路径：\n{LivePathPrefabPath}", "确定");
-            return;
-        }
-
-        string prefabPath = AssetDatabase.GetAssetPath(prefab);
-        string[] scenePaths = GetBuildScenePaths();
-
-        if (scenePaths.Length == 0)
-        {
-            EditorUtility.DisplayDialog("未找到场景", "Build Settings 中没有可处理的场景。", "确定");
-            return;
-        }
-
-        bool confirmed = EditorUtility.DisplayDialog(
-            "批量删除直播路径",
-            $"将从 Build Settings 中的 {scenePaths.Length} 个场景里删除当前挂载预制体实例。",
-            "删除",
-            "取消");
-
-        if (!confirmed)
-        {
-            return;
-        }
-
-        SceneSetup[] originalSetup = EditorSceneManager.GetSceneManagerSetup();
-        int removedCount = 0;
-        int untouchedCount = 0;
-
-        try
-        {
-            foreach (string scenePath in scenePaths)
-            {
-                Scene scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
-                List<GameObject> instances = FindPrefabInstancesInScene(scene, prefabPath);
-                if (instances.Count == 0)
-                {
-                    untouchedCount++;
-                    continue;
-                }
-
-                foreach (GameObject instance in instances)
-                {
-                    Undo.DestroyObjectImmediate(instance);
-                    removedCount++;
-                }
-
-                EditorSceneManager.MarkSceneDirty(scene);
-                EditorSceneManager.SaveScene(scene);
-            }
-        }
-        finally
-        {
-            if (originalSetup != null && originalSetup.Length > 0)
-            {
-                EditorSceneManager.RestoreSceneManagerSetup(originalSetup);
-            }
-        }
-
-        EditorUtility.DisplayDialog(
-            "处理完成",
-            $"已删除 {removedCount} 个实例，{untouchedCount} 个场景未发现该预制体。",
-            "确定");
-    }
-
-    bool ApplyLivePathTextToInstances(List<GameObject> instances, string sceneText)
-    {
-        bool changed = false;
-        foreach (GameObject instance in instances)
-        {
-            if (instance == null)
-            {
-                continue;
-            }
-
-            changed |= ApplyLivePathText(instance, sceneText);
-        }
-
-        return changed;
-    }
-
-    bool ApplyLivePathText(GameObject instance, string sceneText)
-    {
-        if (instance == null)
-        {
-            return false;
-        }
-
-        string normalizedText = sceneText ?? string.Empty;
-        bool changed = false;
-        Text[] texts = instance.GetComponentsInChildren<Text>(true);
-        foreach (Text text in texts)
-        {
-            if (text == null)
-            {
-                continue;
-            }
-
-            if (text.text != normalizedText)
-            {
-                Undo.RecordObject(text, "设置直播路径文字");
-                text.text = normalizedText;
-                PrefabUtility.RecordPrefabInstancePropertyModifications(text);
-                EditorUtility.SetDirty(text);
-                changed = true;
-            }
-
-            string textObjectName = string.IsNullOrWhiteSpace(normalizedText) ? "直播路径文字" : normalizedText;
-            if (text.gameObject.name != textObjectName)
-            {
-                Undo.RecordObject(text.gameObject, "设置直播路径文字名称");
-                text.gameObject.name = textObjectName;
-                EditorUtility.SetDirty(text.gameObject);
-                changed = true;
-            }
-        }
-
-        return changed;
-    }
-
-    List<GameObject> FindPrefabInstancesInScene(Scene scene, string prefabPath)
-    {
-        List<GameObject> matches = new List<GameObject>();
-        HashSet<GameObject> uniqueRoots = new HashSet<GameObject>();
-
-        foreach (GameObject root in scene.GetRootGameObjects())
-        {
-            Transform[] children = root.GetComponentsInChildren<Transform>(true);
-            foreach (Transform child in children)
-            {
-                GameObject source = PrefabUtility.GetCorrespondingObjectFromSource(child.gameObject);
-                if (source == null)
-                {
-                    continue;
-                }
-
-                string sourcePath = AssetDatabase.GetAssetPath(source);
-                if (string.Equals(sourcePath, prefabPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    GameObject instanceRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(child.gameObject) ?? child.gameObject;
-                    if (uniqueRoots.Add(instanceRoot))
-                    {
-                        matches.Add(instanceRoot);
-                    }
-                }
-            }
-        }
-
-        return matches;
-    }
-
     void LoadRewardConfigDrafts()
     {
         UnityEngine.Object adeDataInfo = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdeDataInfoPath);
         if (adeDataInfo != null)
         {
-            EnsureListField(adeDataInfo, "SubscribeTmplIds");
-            EnsureListField(adeDataInfo, "FeedContentIDs");
+            EnsureAdeDataInfoFeedFields(adeDataInfo);
             rewardShareIdDraft = GetStringFieldValue(adeDataInfo, "ShareId");
-            rewardFeedRepeatContentIdDraft = GetStringFieldValue(adeDataInfo, "FeedRepeatContentID");
 
             subscribeTemplateDrafts.Clear();
             subscribeTemplateDrafts.AddRange(GetOrCreateStringListField(adeDataInfo, "SubscribeTmplIds"));
 
-            feedContentDrafts.Clear();
-            feedContentDrafts.AddRange(GetOrCreateStringListField(adeDataInfo, "FeedContentIDs"));
+            feedRepeatContentDrafts.Clear();
+            feedRepeatContentDrafts.AddRange(GetOrCreateStringListField(adeDataInfo, "FeedRepeatContentIDs"));
+
+            feedAcquisitionContentDrafts.Clear();
+            feedAcquisitionContentDrafts.AddRange(GetOrCreateStringListField(adeDataInfo, "FeedAcquisitionContentIDs"));
         }
 
         UnityEngine.Object adsData = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AdsDataPath);
@@ -2699,7 +2434,8 @@ public class AdeConsoleWindow : EditorWindow
 
         rewardConfigDirty = false;
         subscribeTemplateSelection.Clear();
-        feedContentSelection.Clear();
+        feedRepeatContentSelection.Clear();
+        feedAcquisitionContentSelection.Clear();
         rewardAdSelection.Clear();
         gridAdSelection.Clear();
         moreGamesQuerySelection.Clear();
@@ -2711,10 +2447,14 @@ public class AdeConsoleWindow : EditorWindow
         if (adeDataInfo != null)
         {
             Undo.RecordObject(adeDataInfo, "应用 AdeDataInfo 参数");
+            List<string> repeatContentIds = GetNormalizedStringDrafts(feedRepeatContentDrafts);
+            List<string> acquisitionContentIds = GetNormalizedStringDrafts(feedAcquisitionContentDrafts);
             SetFieldValue(adeDataInfo, "ShareId", rewardShareIdDraft ?? string.Empty);
-            SetFieldValue(adeDataInfo, "FeedRepeatContentID", rewardFeedRepeatContentIdDraft ?? string.Empty);
-            SetFieldValue(adeDataInfo, "SubscribeTmplIds", new List<string>(subscribeTemplateDrafts));
-            SetFieldValue(adeDataInfo, "FeedContentIDs", new List<string>(feedContentDrafts));
+            SetFieldValue(adeDataInfo, "FeedRepeatContentIDs", repeatContentIds);
+            SetFieldValue(adeDataInfo, "FeedAcquisitionContentIDs", acquisitionContentIds);
+            SetFieldValue(adeDataInfo, "FeedRepeatContentID", repeatContentIds.Count > 0 ? repeatContentIds[0] : string.Empty);
+            SetFieldValue(adeDataInfo, "SubscribeTmplIds", GetNormalizedStringDrafts(subscribeTemplateDrafts));
+            SetFieldValue(adeDataInfo, "FeedContentIDs", new List<string>(acquisitionContentIds));
             SaveReflectedAssetChanges(adeDataInfo);
         }
 
@@ -2962,17 +2702,6 @@ public class AdeConsoleWindow : EditorWindow
         }
     }
 
-    GameObject ResolveLivePathPrefab()
-    {
-        if (livePathPrefabOverride != null)
-        {
-            return livePathPrefabOverride;
-        }
-
-        livePathPrefabOverride = AssetDatabase.LoadAssetAtPath<GameObject>(LivePathPrefabPath);
-        return livePathPrefabOverride;
-    }
-
     void SaveFeedLaunchMode()
     {
         if (!launchModeDirty)
@@ -3094,62 +2823,9 @@ public class AdeConsoleWindow : EditorWindow
         return null;
     }
 
-    void DeleteImportedPackageAssets(string packagePath, string[] importedAssets)
-    {
-        string[] existingAssets = importedAssets.Where(AssetExists).ToArray();
-        if (existingAssets.Length == 0)
-        {
-            EditorUtility.DisplayDialog("未找到内容", $"当前工程中没有检测到来自\n{packagePath}\n的已导入内容。", "确定");
-            return;
-        }
-
-        string assetList = string.Join("\n", existingAssets);
-        bool confirmed = EditorUtility.DisplayDialog(
-            "确认删除包内容",
-            $"将删除以下内容：\n{assetList}\n\n来源包：\n{packagePath}",
-            "删除",
-            "取消");
-
-        if (!confirmed)
-        {
-            return;
-        }
-
-        int deletedCount = 0;
-        foreach (string assetPath in existingAssets)
-        {
-            if (AssetDatabase.DeleteAsset(assetPath))
-            {
-                deletedCount++;
-            }
-            else
-            {
-                Debug.LogWarning($"AdeConsole: 删除失败 {assetPath}");
-            }
-        }
-
-        AssetDatabase.Refresh();
-        Debug.Log($"AdeConsole: 已删除 {deletedCount} 项包内容");
-        Repaint();
-    }
-
-    bool AnyAssetExists(IEnumerable<string> assetPaths)
-    {
-        return assetPaths.Any(AssetExists);
-    }
-
-    bool AssetExists(string assetPath)
-    {
-        return AssetDatabase.IsValidFolder(assetPath) || AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(assetPath) != null;
-    }
-
     void CreateAdeDataInfoAsset()
     {
-        CreateScriptableAsset("AdeDataInfo", AdeDataInfoPath, asset =>
-        {
-            EnsureListField(asset, "SubscribeTmplIds");
-            EnsureListField(asset, "FeedContentIDs");
-        });
+        CreateScriptableAsset("AdeDataInfo", AdeDataInfoPath, EnsureAdeDataInfoFeedFields);
     }
 
     void CreateAdsDataAsset()
@@ -3170,92 +2846,6 @@ public class AdeConsoleWindow : EditorWindow
         }
 
         AssetDatabase.CreateFolder("Assets/Ade_Framework/Resources", "ScriptableObject");
-    }
-
-    void TriggerShareFromConsole()
-    {
-        if (InvokeSingletonMethod("Ade_Framework.AdeSDK", "OnShare", (Action)(() => Debug.Log("AdeConsole: 分享成功"))))
-        {
-            Debug.Log("AdeConsole: 已调用分享接口");
-        }
-        else
-        {
-            Debug.LogWarning("AdeConsole: 当前环境不可用分享接口");
-        }
-    }
-
-    void TriggerSubscribeFromConsole()
-    {
-        if (InvokeSingletonMethod("Ade_Framework.AdeSDK", "OnRequestSubscribeMessage", (Action)(() => Debug.Log("AdeConsole: 订阅成功"))))
-        {
-            Debug.Log("AdeConsole: 已调用订阅接口");
-        }
-        else
-        {
-            Debug.LogWarning("AdeConsole: 当前环境不可用订阅接口");
-        }
-    }
-
-    void TriggerRankListFromConsole()
-    {
-        if (!InvokeSingletonMethod("Ade_Framework.AdeSDK", "RefreshLeaderboard"))
-        {
-            Debug.LogWarning("AdeConsole: 当前环境不可用排行榜接口");
-        }
-    }
-
-    void TriggerFeedFromConsole()
-    {
-        if (!InvokeSingletonMethod("Ade_Framework.AdeSDK", "CheckAndRequestFeed"))
-        {
-            Debug.LogWarning("AdeConsole: 当前环境不可用推荐流接口");
-        }
-    }
-
-    bool InvokeSingletonMethod(string typeName, string methodName, params object[] args)
-    {
-        try
-        {
-            Type targetType = FindType(typeName);
-            if (targetType == null)
-            {
-                Debug.LogWarning($"AdeConsole: 未找到类型 {typeName}");
-                return false;
-            }
-
-            object instance = targetType.GetProperty("Instance")?.GetValue(null);
-            if (instance == null)
-            {
-                Debug.LogWarning($"AdeConsole: 未获取到 {typeName}.Instance");
-                return false;
-            }
-
-            object[] actualArgs = args ?? Array.Empty<object>();
-            Type[] argTypes = actualArgs.Select(item => item?.GetType() ?? typeof(object)).ToArray();
-            var method = targetType.GetMethod(methodName, argTypes);
-            if (method == null)
-            {
-                method = targetType
-                    .GetMethods()
-                    .FirstOrDefault(candidate =>
-                        candidate.Name == methodName &&
-                        candidate.GetParameters().Length == actualArgs.Length);
-            }
-
-            if (method == null)
-            {
-                Debug.LogWarning($"AdeConsole: 未找到方法 {typeName}.{methodName}");
-                return false;
-            }
-
-            method.Invoke(instance, actualArgs);
-            return true;
-        }
-        catch (Exception exception)
-        {
-            Debug.LogWarning($"AdeConsole: 调用 {typeName}.{methodName} 失败\n{exception.Message}");
-            return false;
-        }
     }
 
     Type FindType(string typeName)
@@ -3301,6 +2891,60 @@ public class AdeConsoleWindow : EditorWindow
 
         field.SetValue(target, new List<string>());
         EditorUtility.SetDirty(target);
+    }
+
+    void EnsureAdeDataInfoFeedFields(UnityEngine.Object adeDataInfo)
+    {
+        if (adeDataInfo == null)
+        {
+            return;
+        }
+
+        EnsureListField(adeDataInfo, "SubscribeTmplIds");
+        EnsureListField(adeDataInfo, "FeedContentIDs");
+        EnsureListField(adeDataInfo, "FeedRepeatContentIDs");
+        EnsureListField(adeDataInfo, "FeedAcquisitionContentIDs");
+
+        List<string> repeatIds = GetOrCreateStringListField(adeDataInfo, "FeedRepeatContentIDs");
+        string legacyRepeatId = GetStringFieldValue(adeDataInfo, "FeedRepeatContentID");
+        bool changed = AddUniqueStringValue(repeatIds, legacyRepeatId);
+
+        List<string> acquisitionIds = GetOrCreateStringListField(adeDataInfo, "FeedAcquisitionContentIDs");
+        foreach (string legacyContentId in GetOrCreateStringListField(adeDataInfo, "FeedContentIDs"))
+        {
+            changed |= AddUniqueStringValue(acquisitionIds, legacyContentId);
+        }
+
+        if (changed)
+        {
+            EditorUtility.SetDirty(adeDataInfo);
+        }
+    }
+
+    bool AddUniqueStringValue(List<string> target, string value)
+    {
+        if (target == null || string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        string normalizedValue = value.Trim();
+        if (target.Any(item => string.Equals(item, normalizedValue, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        target.Add(normalizedValue);
+        return true;
+    }
+
+    List<string> GetNormalizedStringDrafts(IEnumerable<string> source)
+    {
+        return (source ?? Enumerable.Empty<string>())
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct()
+            .ToList();
     }
 
     void EnsureAdsDataStructure(UnityEngine.Object adsData)
@@ -3416,19 +3060,6 @@ public class AdeConsoleWindow : EditorWindow
     {
         public string AppId = string.Empty;
         public string Query = string.Empty;
-    }
-
-    [Serializable]
-    class LivePathSceneTextDraft
-    {
-        public string ScenePath = string.Empty;
-        public string Text = string.Empty;
-    }
-
-    [Serializable]
-    class LivePathSceneTextStore
-    {
-        public List<LivePathSceneTextDraft> Items = new();
     }
 
     class ListSelectionState

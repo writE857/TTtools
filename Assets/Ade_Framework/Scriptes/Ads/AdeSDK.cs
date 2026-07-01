@@ -146,7 +146,6 @@ namespace Ade_Framework
             WX.ReportGameStart();
 
             Wx_windowInfo = WX.GetWindowInfo();
-            SetupWeChatShare();
 
 #elif Ade_KS
             KS.ReportGameStart();
@@ -264,9 +263,6 @@ namespace Ade_Framework
         /// </summary>
         public WindowInfo  Wx_windowInfo;
 
-        const string WeChatShareAppMessageMenu = "shareAppMessage";
-        const string WeChatShareTimelineMenu = "shareTimeline";
-
         public bool IsSubscribeAvailable
         {
 #if UNITY_EDITOR || Ade_Debug
@@ -274,85 +270,6 @@ namespace Ade_Framework
 #else
             get => WX.CanIUse("requestSubscribeMessage");
 #endif
-        }
-
-        void SetupWeChatShare()
-        {
-            bool canShareTimeline = WX.CanIUse("onShareTimeline");
-            WX.ShowShareMenu(new ShowShareMenuOption
-            {
-                menus = canShareTimeline
-                    ? new[] { WeChatShareAppMessageMenu, WeChatShareTimelineMenu }
-                    : new[] { WeChatShareAppMessageMenu },
-                withShareTicket = true
-            });
-
-            WX.OnShareAppMessage(CreateWeChatShareParam(), resolve =>
-            {
-                resolve?.Invoke(CreateWeChatShareParam());
-            });
-
-            if (canShareTimeline)
-            {
-                WX.OnShareTimeline(resolve =>
-                {
-                    resolve?.Invoke(CreateWeChatShareTimelineParam());
-                });
-            }
-        }
-
-        ShareAppMessageOption CreateWeChatShareOption()
-        {
-            var option = new ShareAppMessageOption();
-            ApplyWeChatShareImage(GetWeChatShareId(), value => option.imageUrl = value, value => option.imageUrlId = value);
-            return option;
-        }
-
-        WXShareAppMessageParam CreateWeChatShareParam()
-        {
-            var param = new WXShareAppMessageParam();
-            ApplyWeChatShareImage(GetWeChatShareId(), value => param.imageUrl = value, value => param.imageUrlId = value);
-            return param;
-        }
-
-        OnShareTimelineListenerResult CreateWeChatShareTimelineParam()
-        {
-            var param = new OnShareTimelineListenerResult();
-            ApplyWeChatShareImage(
-                GetWeChatShareId(),
-                value =>
-                {
-                    param.imageUrl = value;
-                    param.imagePreviewUrl = value;
-                },
-                value =>
-                {
-                    param.imageUrlId = value;
-                    param.imagePreviewUrlId = value;
-                });
-            return param;
-        }
-
-        void ApplyWeChatShareImage(string shareValue, Action<string> setImageUrl, Action<string> setImageUrlId)
-        {
-            if (string.IsNullOrEmpty(shareValue))
-            {
-                return;
-            }
-
-            if (shareValue.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                shareValue.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                setImageUrl?.Invoke(shareValue);
-                return;
-            }
-
-            setImageUrlId?.Invoke(shareValue);
-        }
-
-        string GetWeChatShareId()
-        {
-            return _AdeDataInfo == null ? string.Empty : (_AdeDataInfo.ShareId ?? string.Empty).Trim();
         }
 #endif
         #endregion
@@ -606,8 +523,22 @@ namespace Ade_Framework
             });
 
 #elif Ade_WX
-            Debug.Log("微信分享图：" + GetWeChatShareId());
-            WX.ShareAppMessage(CreateWeChatShareOption());
+            string shareId = _AdeDataInfo == null ? string.Empty : (_AdeDataInfo.ShareId ?? string.Empty).Trim();
+            Debug.Log("微信分享图：" + shareId);
+            ShareAppMessageOption samo = new ShareAppMessageOption();
+            if (!string.IsNullOrEmpty(shareId))
+            {
+                if (shareId.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    shareId.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    samo.imageUrl = shareId;
+                }
+                else
+                {
+                    samo.imageUrlId = shareId;
+                }
+            }
+            WX.ShareAppMessage(samo);
 #elif Ade_KS
             KS.ShareAppMessage(new ShareAppMessageOption());
 #endif
@@ -908,6 +839,16 @@ namespace Ade_Framework
         public FeedSceneType CurrentFeedScene { get; private set; } = FeedSceneType.None;
 
         /// <summary>
+        /// 当前推荐流启动携带的平台内容ID
+        /// </summary>
+        public string CurrentFeedContentId { get; private set; } = string.Empty;
+
+        /// <summary>
+        /// 当前推荐流启动携带的平台渠道
+        /// </summary>
+        public string CurrentFeedChannel { get; private set; } = string.Empty;
+
+        /// <summary>
         /// 检查并处理推荐流启动场景
         /// 应在游戏启动时调用
         /// </summary>
@@ -934,33 +875,32 @@ namespace Ade_Framework
             Debug.Log($"启动数据GetLaunchOptionsSync.launchOptions.Scene:" + launchScene);
             // 使用LaunchOption的scene属性
             string scene = launchScene.Length > 4 ? launchScene.Substring(launchScene.Length - 4) : string.Empty;
-            string feedGameChannel = string.Empty;
+            CurrentFeedChannel = string.Empty;
+            CurrentFeedContentId = string.Empty;
             if (launchOptions.Query != null && launchOptions.Query.ContainsKey("feed_game_channel"))
             {
-                feedGameChannel = launchOptions.Query["feed_game_channel"]?.ToString();
+                CurrentFeedChannel = launchOptions.Query["feed_game_channel"]?.ToString();
+            }
+
+            if (launchOptions.Query != null && launchOptions.Query.ContainsKey("feed_game_content_id"))
+            {
+                CurrentFeedContentId = launchOptions.Query["feed_game_content_id"]?.ToString();
             }
 
             if (scene == "3041")
             {
                 isFeedPlay = true;
-                // 判断是否为推荐流直出场景(复访版)
-                if (feedGameChannel == "1")
+                CurrentFeedScene = ResolveFeedSceneType(CurrentFeedChannel, CurrentFeedContentId);
+
+                if (CurrentFeedScene == FeedSceneType.FeedDirectPlay)
                 {
-                    CurrentFeedScene = FeedSceneType.FeedDirectPlay;
-
-                    Debug.Log($"[推荐流-复访版] 启动");
-
-                    // 触发回调
+                    Debug.Log($"[推荐流-复访版] 启动 ContentID:{CurrentFeedContentId}");
                     onFeedDirectPlay?.Invoke();
                 }
-                // 判断是否为获客版场景
                 else
                 {
                     CurrentFeedScene = FeedSceneType.FeedAcquisition;
-
-                    Debug.Log("[推荐流-获客版] 启动");
-
-                    // 触发回调
+                    Debug.Log($"[推荐流-获客版] 启动 ContentID:{CurrentFeedContentId}");
                     onFeedAcquisition?.Invoke();
                 }
             }
@@ -980,6 +920,9 @@ namespace Ade_Framework
                 (FeedSceneType)EditorPrefs.GetInt(EditorFeedLaunchModeEditorPrefsKey, (int)FeedSceneType.None);
             CurrentFeedScene = editorLaunchMode;
             isFeedPlay = editorLaunchMode != FeedSceneType.None;
+            CurrentFeedChannel = editorLaunchMode == FeedSceneType.FeedDirectPlay ? "1" :
+                editorLaunchMode == FeedSceneType.FeedAcquisition ? "2" : string.Empty;
+            CurrentFeedContentId = string.Empty;
 
             switch (editorLaunchMode)
             {
@@ -998,6 +941,90 @@ namespace Ade_Framework
             }
         }
 #endif
+
+        FeedSceneType ResolveFeedSceneType(string feedGameChannel, string feedContentId)
+        {
+            if (feedGameChannel == "1")
+            {
+                return FeedSceneType.FeedDirectPlay;
+            }
+
+            if (feedGameChannel == "2")
+            {
+                return FeedSceneType.FeedAcquisition;
+            }
+
+            if (!string.IsNullOrWhiteSpace(feedContentId))
+            {
+                if (GetFeedRepeatContentIds().Any(id => string.Equals(id, feedContentId, StringComparison.Ordinal)))
+                {
+                    return FeedSceneType.FeedDirectPlay;
+                }
+
+                if (GetFeedAcquisitionContentIds().Any(id => string.Equals(id, feedContentId, StringComparison.Ordinal)))
+                {
+                    return FeedSceneType.FeedAcquisition;
+                }
+            }
+
+            Debug.LogWarning($"[推荐流] 未识别 feed_game_channel:{feedGameChannel}，默认按获客启动处理");
+            return FeedSceneType.FeedAcquisition;
+        }
+
+        public bool HasAnyFeedContentId()
+        {
+            return GetAllFeedContentIds().Count > 0;
+        }
+
+        List<string> GetAllFeedContentIds()
+        {
+            List<string> result = GetFeedRepeatContentIds();
+            AddFeedContentIds(result, GetFeedAcquisitionContentIds());
+            return result;
+        }
+
+        List<string> GetFeedRepeatContentIds()
+        {
+            List<string> result = new List<string>();
+            AddFeedContentIds(result, _AdeDataInfo?.FeedRepeatContentIDs);
+            AddFeedContentId(result, _AdeDataInfo?.FeedRepeatContentID);
+            return result;
+        }
+
+        List<string> GetFeedAcquisitionContentIds()
+        {
+            List<string> result = new List<string>();
+            AddFeedContentIds(result, _AdeDataInfo?.FeedAcquisitionContentIDs);
+            AddFeedContentIds(result, _AdeDataInfo?.FeedContentIDs);
+            return result;
+        }
+
+        void AddFeedContentIds(List<string> target, IEnumerable<string> source)
+        {
+            if (target == null || source == null)
+            {
+                return;
+            }
+
+            foreach (string id in source)
+            {
+                AddFeedContentId(target, id);
+            }
+        }
+
+        void AddFeedContentId(List<string> target, string id)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(id))
+            {
+                return;
+            }
+
+            string normalizedId = id.Trim();
+            if (!target.Any(item => string.Equals(item, normalizedId, StringComparison.Ordinal)))
+            {
+                target.Add(normalizedId);
+            }
+        }
 
         /// <summary>
         /// 上报推荐流场景加载完成
@@ -1032,18 +1059,17 @@ namespace Ade_Framework
             onSuccess?.Invoke();
             return;
 #endif
-            // 检查是否配置了contentIDs
-            if (_AdeDataInfo.FeedContentIDs == null || _AdeDataInfo.FeedContentIDs.Count == 0)
+            List<string> feedContentIds = GetAllFeedContentIds();
+            if (feedContentIds.Count == 0)
             {
-                Debug.LogError("[推荐流] FeedContentIDs未配置! 请在AdeDataInfo中配置推荐流内容ID");
-                onFail?.Invoke("FeedContentIDs未配置");
+                Debug.LogError("[推荐流] 推荐流内容ID未配置! 请在AdeDataInfo中配置复访或获客内容ID");
+                onFail?.Invoke("推荐流内容ID未配置");
                 return;
             }
 
-            // 构建contentIDs数组
             var contentIDsArray = new JsonData();
             contentIDsArray.SetJsonType(JsonType.Array);
-            foreach (var id in _AdeDataInfo.FeedContentIDs)
+            foreach (var id in feedContentIds)
             {
                 contentIDsArray.Add(id);
             }
@@ -1099,8 +1125,8 @@ namespace Ade_Framework
 #endif
             var param = new JsonData
             {
-                ["type"] = "play",      // 订阅类型: play=直玩
-                ["scene"] = 2,          // 场景类型: 3=推荐流
+                ["type"] = "play",
+                ["allScene"] = true,
             };
 
             TT.CheckFeedSubscribeStatus(param,
@@ -1162,42 +1188,59 @@ namespace Ade_Framework
         /// </summary>
         public void StoreFeedData() 
         {
-            LogManager.Log("复访推荐流单独上报");
-            StoreFeedDataParam storeFeedData = new StoreFeedDataParam();
-            // 期望 30s 后出卡
-            var currentTime = DateTimeOffset.UtcNow;
-            var milliseconds = currentTime.ToUnixTimeMilliseconds();
-            var targetMilliSeconds = milliseconds + 30 * 1000;
-            storeFeedData.ContentID = _AdeDataInfo.FeedRepeatContentID;
-            storeFeedData.Scene = 3;
-            storeFeedData.Status = 1;
-            storeFeedData.Operator = ">=";
-            storeFeedData.Extra = "";
-            storeFeedData.RightValue = targetMilliSeconds.ToString();
-            storeFeedData.LeftValue = "timeStampMs";
-
-            storeFeedData.Fail = (info) =>
-            {
-                LogManager.Log("复访推荐流单独上报错误：" + info.ErrMsg);
-            };
-#if !UNITY_EDITOR && !Ade_Debug
-            TT.StoreFeedData(storeFeedData);
-#endif
+            StoreFeedDataForRepeatIds(3);
 
         }
+
+        public void StoreFeedData(string contentId)
+        {
+            StoreFeedDataForContent(contentId, 3);
+        }
+
         /// <summary>
         /// 体力恢复复访推荐流
         /// </summary>
         public void StoreFeedDataforVit()
         {
-            LogManager.Log("复访推荐流单独上报");
+            StoreFeedDataForRepeatIds(2);
+        }
+
+        public void StoreFeedDataforVit(string contentId)
+        {
+            StoreFeedDataForContent(contentId, 2);
+        }
+
+        void StoreFeedDataForRepeatIds(int scene)
+        {
+            List<string> repeatContentIds = GetFeedRepeatContentIds();
+            if (repeatContentIds.Count == 0)
+            {
+                LogManager.LogError("复访推荐流ID未配置");
+                return;
+            }
+
+            foreach (string contentId in repeatContentIds)
+            {
+                StoreFeedDataForContent(contentId, scene);
+            }
+        }
+
+        void StoreFeedDataForContent(string contentId, int scene)
+        {
+            if (string.IsNullOrWhiteSpace(contentId))
+            {
+                LogManager.LogError("复访推荐流ID为空");
+                return;
+            }
+
+            LogManager.Log($"复访推荐流单独上报:{contentId}");
             StoreFeedDataParam storeFeedData = new StoreFeedDataParam();
             // 期望 30s 后出卡
             var currentTime = DateTimeOffset.UtcNow;
             var milliseconds = currentTime.ToUnixTimeMilliseconds();
             var targetMilliSeconds = milliseconds + 30 * 1000;
-            storeFeedData.ContentID = _AdeDataInfo.FeedRepeatContentID;
-            storeFeedData.Scene = 2;
+            storeFeedData.ContentID = contentId.Trim();
+            storeFeedData.Scene = scene;
             storeFeedData.Status = 1;
             storeFeedData.Operator = ">=";
             storeFeedData.Extra = "";
@@ -1211,7 +1254,6 @@ namespace Ade_Framework
 #if !UNITY_EDITOR && !Ade_Debug
             TT.StoreFeedData(storeFeedData);
 #endif
-
         }
 
         /// <summary>
