@@ -615,7 +615,7 @@ public class AdeConsoleWindow : EditorWindow
                 GUILayout.FlexibleSpace();
 
                 GUI.enabled = sidebarPrefabDirty;
-                if (GUILayout.Button("保存  Ctrl+S", GUILayout.Width(92f)))
+                if (GUILayout.Button("保存", GUILayout.Width(56f)))
                 {
                     SaveSidebarPrefabContents();
                 }
@@ -635,7 +635,6 @@ public class AdeConsoleWindow : EditorWindow
             }
 
             DrawSidebarFixedImageSlot("mask/icon", "icon");
-            EditorGUILayout.Space(1f);
             DrawSidebarAppNameSlot("AppName1", "AppName2");
         }
     }
@@ -784,17 +783,18 @@ public class AdeConsoleWindow : EditorWindow
             return;
         }
 
-        Rect rowRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight);
-        Rect labelRect = new Rect(rowRect.x, rowRect.y, 42f, rowRect.height);
-        Rect fieldRect = new Rect(rowRect.x + 46f, rowRect.y, rowRect.width - 46f, rowRect.height);
-        GUI.Label(labelRect, label, EditorStyles.miniBoldLabel);
-        EditorGUI.BeginChangeCheck();
-        Sprite sprite = (Sprite)EditorGUI.ObjectField(fieldRect, image.sprite, typeof(Sprite), false);
-        if (EditorGUI.EndChangeCheck())
+        using (new EditorGUILayout.HorizontalScope())
         {
-            Undo.RecordObject(image, "编辑 SidebarUI 图片");
-            image.sprite = sprite;
-            MarkSidebarPrefabDirty(image);
+            GUILayout.Label(label, EditorStyles.miniBoldLabel, GUILayout.Width(60f));
+            EditorGUI.BeginChangeCheck();
+            Sprite sprite = (Sprite)EditorGUILayout.ObjectField(image.sprite, typeof(Sprite), false, GUILayout.Width(64f), GUILayout.Height(64f));
+            GUILayout.FlexibleSpace();
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(image, "编辑 SidebarUI 图片");
+                image.sprite = sprite;
+                MarkSidebarPrefabDirty(image);
+            }
         }
     }
 
@@ -816,21 +816,21 @@ public class AdeConsoleWindow : EditorWindow
             return;
         }
 
-        Rect rowRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight);
-        Rect labelRect = new Rect(rowRect.x, rowRect.y, 60f, rowRect.height);
-        Rect fieldRect = new Rect(rowRect.x + 64f, rowRect.y, rowRect.width - 64f, rowRect.height);
-        GUI.Label(labelRect, "appname", EditorStyles.miniBoldLabel);
-        EditorGUI.BeginChangeCheck();
-        string baseValue = string.IsNullOrEmpty(appText.text) ? StripClickPrefix(clickText.text) : appText.text;
-        string value = EditorGUI.TextField(fieldRect, baseValue);
-        if (EditorGUI.EndChangeCheck())
+        using (new EditorGUILayout.HorizontalScope())
         {
-            string clickValue = string.IsNullOrEmpty(value) ? value : $"点击{value}";
-            Undo.RecordObject(clickText, "编辑 SidebarUI 文本");
-            Undo.RecordObject(appText, "编辑 SidebarUI 文本");
-            clickText.text = clickValue;
-            appText.text = value;
-            MarkSidebarPrefabDirty(appText);
+            GUILayout.Label("appname", EditorStyles.miniBoldLabel, GUILayout.Width(60f));
+            EditorGUI.BeginChangeCheck();
+            string baseValue = string.IsNullOrEmpty(appText.text) ? StripClickPrefix(clickText.text) : appText.text;
+            string value = EditorGUILayout.TextField(baseValue);
+            if (EditorGUI.EndChangeCheck())
+            {
+                string clickValue = string.IsNullOrEmpty(value) ? value : $"点击{value}";
+                Undo.RecordObject(clickText, "编辑 SidebarUI 文本");
+                Undo.RecordObject(appText, "编辑 SidebarUI 文本");
+                clickText.text = clickValue;
+                appText.text = value;
+                MarkSidebarPrefabDirty(appText);
+            }
         }
     }
 
