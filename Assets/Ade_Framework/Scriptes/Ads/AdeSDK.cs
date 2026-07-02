@@ -89,8 +89,7 @@ namespace Ade_Framework
             PlatformSetting();
             TimerManager.Instance.Init();
             AdsControler.Instance.Init();
-
-            GameShow();
+            AdeDouyinCloudSave.InitializeFromSettings(GameShow);
         }
 
 

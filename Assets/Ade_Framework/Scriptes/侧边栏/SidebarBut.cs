@@ -60,7 +60,11 @@ public static class SidebarData
 {
     public static bool IsReWard 
     {
-        get => PlayerPrefs.GetInt("SidebarDataIsReWard", 0) == 1;
-        set => PlayerPrefs.SetInt("SidebarDataIsReWard", value ? 1 : 0);
+        get => AdeCloudPlayerPrefs.GetInt("SidebarDataIsReWard", 0) == 1;
+        set
+        {
+            AdeCloudPlayerPrefs.SetInt("SidebarDataIsReWard", value ? 1 : 0);
+            AdeCloudPlayerPrefs.Save();
+        }
     }
 }

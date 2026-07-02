@@ -1,4 +1,5 @@
 using System;
+using Ade_Framework;
 using UnityEngine;
 
 public static class NoAdTicketManager
@@ -9,7 +10,7 @@ public static class NoAdTicketManager
 
     public static int GetCount()
     {
-        return Mathf.Max(0, PlayerPrefs.GetInt(CountKey, 0));
+        return Mathf.Max(0, AdeCloudPlayerPrefs.GetInt(CountKey, 0));
     }
 
     public static bool HasTicket(int amount = 1)
@@ -20,8 +21,8 @@ public static class NoAdTicketManager
     public static void SetCount(int count)
     {
         int safeCount = Mathf.Max(0, count);
-        PlayerPrefs.SetInt(CountKey, safeCount);
-        PlayerPrefs.Save();
+        AdeCloudPlayerPrefs.SetInt(CountKey, safeCount);
+        AdeCloudPlayerPrefs.Save();
         CountChanged?.Invoke(safeCount);
     }
 

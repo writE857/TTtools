@@ -783,18 +783,18 @@ public class AdeConsoleWindow : EditorWindow
             return;
         }
 
-        using (new EditorGUILayout.HorizontalScope())
+        Rect rowRect = EditorGUILayout.GetControlRect(false, 64f);
+        Rect labelRect = new Rect(rowRect.x, rowRect.y + 24f, 60f, EditorGUIUtility.singleLineHeight);
+        Rect fieldRect = new Rect(rowRect.xMax - 64f, rowRect.y, 64f, 64f);
+
+        GUI.Label(labelRect, label, EditorStyles.miniBoldLabel);
+        EditorGUI.BeginChangeCheck();
+        Sprite sprite = (Sprite)EditorGUI.ObjectField(fieldRect, image.sprite, typeof(Sprite), false);
+        if (EditorGUI.EndChangeCheck())
         {
-            GUILayout.Label(label, EditorStyles.miniBoldLabel, GUILayout.Width(60f));
-            EditorGUI.BeginChangeCheck();
-            Sprite sprite = (Sprite)EditorGUILayout.ObjectField(image.sprite, typeof(Sprite), false, GUILayout.Width(64f), GUILayout.Height(64f));
-            GUILayout.FlexibleSpace();
-            if (EditorGUI.EndChangeCheck())
-            {
-                Undo.RecordObject(image, "编辑 SidebarUI 图片");
-                image.sprite = sprite;
-                MarkSidebarPrefabDirty(image);
-            }
+            Undo.RecordObject(image, "编辑 SidebarUI 图片");
+            image.sprite = sprite;
+            MarkSidebarPrefabDirty(image);
         }
     }
 
@@ -816,21 +816,22 @@ public class AdeConsoleWindow : EditorWindow
             return;
         }
 
-        using (new EditorGUILayout.HorizontalScope())
+        Rect rowRect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight + 2f);
+        Rect labelRect = new Rect(rowRect.x, rowRect.y, 60f, rowRect.height);
+        Rect fieldRect = new Rect(rowRect.x + 64f, rowRect.y, rowRect.width - 64f, rowRect.height);
+
+        GUI.Label(labelRect, "appname", EditorStyles.miniBoldLabel);
+        EditorGUI.BeginChangeCheck();
+        string baseValue = string.IsNullOrEmpty(appText.text) ? StripClickPrefix(clickText.text) : appText.text;
+        string value = EditorGUI.TextField(fieldRect, baseValue);
+        if (EditorGUI.EndChangeCheck())
         {
-            GUILayout.Label("appname", EditorStyles.miniBoldLabel, GUILayout.Width(60f));
-            EditorGUI.BeginChangeCheck();
-            string baseValue = string.IsNullOrEmpty(appText.text) ? StripClickPrefix(clickText.text) : appText.text;
-            string value = EditorGUILayout.TextField(baseValue);
-            if (EditorGUI.EndChangeCheck())
-            {
-                string clickValue = string.IsNullOrEmpty(value) ? value : $"点击{value}";
-                Undo.RecordObject(clickText, "编辑 SidebarUI 文本");
-                Undo.RecordObject(appText, "编辑 SidebarUI 文本");
-                clickText.text = clickValue;
-                appText.text = value;
-                MarkSidebarPrefabDirty(appText);
-            }
+            string clickValue = string.IsNullOrEmpty(value) ? value : $"点击{value}";
+            Undo.RecordObject(clickText, "编辑 SidebarUI 文本");
+            Undo.RecordObject(appText, "编辑 SidebarUI 文本");
+            clickText.text = clickValue;
+            appText.text = value;
+            MarkSidebarPrefabDirty(appText);
         }
     }
 
