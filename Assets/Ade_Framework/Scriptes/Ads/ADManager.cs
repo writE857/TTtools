@@ -4,6 +4,18 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum AdSourceType
+{
+    None,
+    StartGame,
+    Pause,
+    Setting,
+    GameEnd,
+    White,
+    Black,
+    Box,
+}
+
 public class ADManager : Single<ADManager>
 {
     const string RewardAdName = "激励";
@@ -36,6 +48,38 @@ public class ADManager : Single<ADManager>
     public void ShowBlackAd()
     {
         
+    }
+
+    // 给其他框架预留的适配入口，当前暂不执行实际广告逻辑。
+    public void Show(AdSourceType type)
+    {
+        switch (type)
+        {
+            case AdSourceType.StartGame:
+                // Black + Box
+                break;
+            case AdSourceType.Pause:
+                // White
+                break;
+            case AdSourceType.Setting:
+                // White
+                break;
+            case AdSourceType.GameEnd:
+                // White + Box
+                break;
+            case AdSourceType.White:
+                // White
+                break;
+            case AdSourceType.Black:
+                // Black
+                break;
+            case AdSourceType.Box:
+                // Box
+                break;
+            case AdSourceType.None:
+            default:
+                break;
+        }
     }
 
     public void ShowRewardAD(Action onSuccess, Action onFailure = null)
